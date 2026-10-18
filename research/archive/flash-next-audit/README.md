@@ -1,7 +1,7 @@
 # Research on Qwen Flash Next
 
 Deep research audit of the Gemini chat captured in
-[`../Running Qwen flash next on Colab.md`](../Running%20Qwen%20flash%20next%20on%20Colab.md).
+[`../flash-next-chat.md`](../flash-next-chat.md).
 
 **Question:** are the hardware, model, speed, VRAM, and Colab Compute-Unit
 claims in that document true enough to switch the Colab worker from
@@ -13,14 +13,16 @@ abliterated Qwen 3.8 27B (`llama.cpp` / A100) to
 A tenth synthesizer session runs after the nine finish.
 
 Do not treat this folder as launch instructions. Shipping docs stay at the
-repo root until a later sitting promotes a verdict.
+repo root ([`../../../README.md`](../../../README.md)) until a later sitting promotes a verdict.
+This dossier is archive; shipping claims-ledger.md / decision.md win on conflict.
 
 ## Source
 
-- Chat dump: [`../Running Qwen flash next on Colab.md`](../Running%20Qwen%20flash%20next%20on%20Colab.md)
+- Chat dump: [`../flash-next-chat.md`](../flash-next-chat.md)
 - Numbered claims: [`CLAIMS.md`](CLAIMS.md)
-- Existing 27B plan (context only): [`../README.md`](../README.md), [`../architecture.md`](../architecture.md), [`../plan_audit_and_fixes.md`](../plan_audit_and_fixes.md)
-- Prior 27B research archive: [`../research/`](../research/README.md)
+- Existing 27B plan (context only): [`../27b-plan/architecture.md`](../27b-plan/architecture.md), [`../27b-plan/plan_audit_and_fixes.md`](../27b-plan/plan_audit_and_fixes.md)
+- Parent research index: [`../../README.md`](../../README.md)
+- Root shipping README: [`../../../README.md`](../../../README.md)
 
 ## Job map
 
@@ -37,7 +39,7 @@ repo root until a later sitting promotes a verdict.
 | 09 | [`09_quality_abliteration_agent_fit.md`](09_quality_abliteration_agent_fit.md) | Q1–Q10 | Coding quality, abliteration, tools, thinking, vs current 27B worker |
 | 10 | [`10_claims_ledger_and_verdict.md`](10_claims_ledger_and_verdict.md) | all | Synthesizer. Runs only after 01–09 exist. |
 
-Job prompts live in [`_jobs/`](_jobs/). Do not edit them once a session has started.
+Job prompts were removed.
 
 ## Verdict labels each paper must use
 
