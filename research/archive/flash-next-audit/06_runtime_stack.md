@@ -12,7 +12,7 @@ Switching the Colab worker from Qwen 3.8 27B to `nvidia/Qwen3.8-Flash-Next-NVFP4
 | ID | Chat Claim | Label | Corrected Value | Source URL |
 | :--- | :--- | :--- | :--- | :--- |
 | **R1** | Fully optimized stack is vLLM / TensorRT-LLM with FlashInfer, CUDA Graphs, PagedAttention. | **PARTIALLY TRUE** | Stack is vLLM / SGLang with FlashInfer CUTLASS kernels; TensorRT-LLM is unviable on Colab; monolithic CUDA graphs fail on Flash-Next (requires breakable graphs). | [vLLM qwen4_exp Docs](https://docs.vllm.ai/en/latest/models/supported_models.html) |
-| **R2** | Speed table C assumes vLLM / SGLang. | **CONFIRMED** | Chat Table C explicitly specifies vLLM / SGLang with batch size 1, FlashInfer backend, and RadixAttention. | [`../Running Qwen flash next on Colab.md`](../Running%20Qwen%20flash%20next%20on%20Colab.md#L81-L90) |
+| **R2** | Speed table C assumes vLLM / SGLang. | **CONFIRMED** | Chat Table C explicitly specifies vLLM / SGLang with batch size 1, FlashInfer backend, and RadixAttention. | [`../flash-next-chat.md`](../flash-next-chat.md#L81-L90) |
 | **R3** | MTP / speculative decoding is available for both NVIDIA checkpoints in those engines. | **PARTIALLY TRUE** | Both models embed MTP heads; supported in vLLM via `--speculative-config` and SGLang via `--speculative-algorithm MTP`, but requires bleeding-edge builds and encounters graph-break penalties on GDN recurrent states. | [vLLM Speculative Decoding](https://docs.vllm.ai/en/latest/features/spec_decode.html) |
 | **R4** | `--kv-cache-dtype fp8` (or equivalent) is supported and halves KV. | **CONFIRMED** | `--kv-cache-dtype fp8` cuts full-attention KV cache by 50% (from 2 bytes to 1 byte per element) across vLLM, SGLang, and TRT-LLM; Flash-Next also requires `--attention-config.indexer_kv_dtype fp8`. | [vLLM KV Cache Config](https://docs.vllm.ai/en/latest/serving/engine_args.html) |
 | **R5** | CUDA graph capture works for decode (`--enforce-eager` off). | **FALSE** | Monolithic CUDA graph capture fails on Flash-Next due to dynamic QSA sparsity masks, 512-expert top-10 MoE routing, and MTP dynamic acceptance length. Engine requires piecewise breakable graphs (`DEFAULT_BREAKABLE_CUDAGRAPH_ARCHITECTURES`) or eager mode. | [vLLM Config `vllm.py`](https://github.com/vllm-project/vllm/blob/main/vllm/config/vllm.py) |
@@ -113,7 +113,7 @@ The chat claim (R1) that a fully optimized Colab stack includes **TensorRT-LLM**
 
 ### 4. llama.cpp Reality, GGUF/NVFP4 Support, and DFlash 2 Non-Transferability
 
-The current locked Colab worker in [`architecture.md`](../architecture.md#L45-L56) is pinned to:
+The current locked Colab worker in [`architecture.md`](../27b-plan/architecture.md#L45-L56) is pinned to:
 - Binary: `llama-server` compiled at commit `efe3626` / tag `b11552`.
 - Target: `Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf` (16.8 GB).
 - Speculative Drafter: Quantized Blackfrost DFlash 2 (`Q4_K_M`, 1.14 GB).
@@ -253,11 +253,11 @@ Total available physical VRAM: $96.0\text{ GB} = 98,304\text{ MB}$.
 ## Conflicts with architecture.md / prior research/
 
 1. **Engine Selection Conflict:**
-   [`../architecture.md` §3](file:///home/sahil/Desktop/sahil/colab/architecture.md#L45-L59) explicitly pins the deployment to `ggml-org/llama.cpp` (`efe3626`) and states: *"vLLM and SGLang are deferred."* However, if the repository evaluates or moves to `Qwen3.8-Flash-Next-NVFP4`, this decision must be completely inverted: `llama.cpp` becomes non-viable, and vLLM/SGLang becomes mandatory.
+   [`../architecture.md` §3](../27b-plan/architecture.md#L45-L59) explicitly pins the deployment to `ggml-org/llama.cpp` (`efe3626`) and states: *"vLLM and SGLang are deferred."* However, if the repository evaluates or moves to `Qwen3.8-Flash-Next-NVFP4`, this decision must be completely inverted: `llama.cpp` becomes non-viable, and vLLM/SGLang becomes mandatory.
 2. **DFlash 2 Dependency Conflict:**
-   [`../architecture.md` §2](file:///home/sahil/Desktop/sahil/colab/architecture.md#L25-L43) places quantized Blackfrost DFlash 2 as the central speculative drafting mechanism (`--spec-type draft-dflash,ngram-map-k4v`). Prior research in `research/qwen38_27b_max_tokens_per_second_deep_research.md` similarly treats DFlash 2 as universal. Flash-Next cannot use DFlash 2; speculation must rely on the integrated 4B MTP head.
+   [`../architecture.md` §2](../27b-plan/architecture.md#L25-L43) places quantized Blackfrost DFlash 2 as the central speculative drafting mechanism (`--spec-type draft-dflash,ngram-map-k4v`). Prior research in `research/qwen38_27b_max_tokens_per_second_deep_research.md` similarly treats DFlash 2 as universal. Flash-Next cannot use DFlash 2; speculation must rely on the integrated 4B MTP head.
 3. **CU Burn per Boot Conflict:**
-   [`../architecture.md` §5](file:///home/sahil/Desktop/sahil/colab/architecture.md#L82-L96) establishes a warm boot target of *"under 45 s after Drive is mounted"* (< 0.10 CU). Adopting vLLM/SGLang on Colab will inflate warm boot to at least 10–15 minutes (~1.08–1.63 CU) unless an entire container image is somehow cached, dramatically reducing the net compute available for agent coding tasks.
+   [`../architecture.md` §5](../27b-plan/architecture.md#L82-L96) establishes a warm boot target of *"under 45 s after Drive is mounted"* (< 0.10 CU). Adopting vLLM/SGLang on Colab will inflate warm boot to at least 10–15 minutes (~1.08–1.63 CU) unless an entire container image is somehow cached, dramatically reducing the net compute available for agent coding tasks.
 
 ---
 

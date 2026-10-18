@@ -23,6 +23,10 @@ Historical planning documents for the 27B worker, superseded by current shipping
 - [`first-boot.md`](27b-plan/first-boot.md): Initial first-sitting checklists and verification gates.
 - [`plan_audit_and_fixes.md`](27b-plan/plan_audit_and_fixes.md): Technical audit identifying compile flags, Curl 2 fixes, and session handling.
 - [`bend-hands.md`](27b-plan/bend-hands.md): Shelved Grok → Gemini → Hermes orchestrator plan.
+- [`fallback-27b.md`](27b-plan/fallback-27b.md): Historical step-by-step launch procedure for uncensored 27B worker via `llama.cpp` on A100 (superseded by abliterated Flash-Next fallback).
+
+> [!NOTE]
+> Any leftover `file:///` paths within archived audit notes are historical artifacts referencing original authoring workspaces. Valid relative links point to corresponding archive locations.
 
 ### 2. Flash-Next Audit Dossier (`flash-next-audit/`)
 Ten-paper research dossier auditing hardware, checkpoints, runtime stack, KV cache, economics, and claims for Qwen 3.8 Flash-Next:

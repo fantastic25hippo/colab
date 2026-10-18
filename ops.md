@@ -4,7 +4,7 @@ Account, Colab CLI, Drive, tunnel, heartbeat, client integration, and shutdown.
 Runbooks:
 - G4 Hardware & Entitlement Probe: [`runbooks/g4-probe.md`](runbooks/g4-probe.md)
 - Qwen 3.8 Flash-Next via SGLang: [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md)
-- Fallback 27B via llama.cpp: [`runbooks/fallback-27b.md`](runbooks/fallback-27b.md)
+- Fallback: abliterated Flash-Next on G4: [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md)
 
 ---
 
@@ -58,7 +58,7 @@ client = OpenAI(
 )
 ```
 
-Both clients interact strictly via standard OpenAI `/v1/chat/completions` and `/v1/models` requests authenticated via the pre-shared Bearer token. Neither client requires internal architectural changes to switch between the Flash-Next and 27B backends.
+Both clients interact strictly via standard OpenAI `/v1/chat/completions` and `/v1/models` requests authenticated via the pre-shared Bearer token. Neither client requires internal architectural changes to switch between stock and abliterated Flash-Next backends.
 
 ---
 
@@ -73,31 +73,9 @@ colab --auth=oauth2 drivemount -s qwen-g4 /content/drive
 # Immediate guard: stop unless RTX PRO 6000 (~95.6 GiB VRAM), host RAM ~177 GB, metered ~8.71 CU/hr
 ```
 
-### Fallback (A100 40GB 27B)
-Follow [`runbooks/fallback-27b.md`](runbooks/fallback-27b.md):
-
-```bash
-colab --auth=oauth2 whoami
-colab --auth=oauth2 sessions
-colab --auth=oauth2 usage          # also check the web Resources panel
-
-colab --auth=oauth2 new -s qwen-worker --gpu A100
-# never pass --high-mem
-
-# Immediate SKU guard:
-# stop if burn > ~6.77 CU/hr, status HIGH_RAM, nvidia-smi ~80 GB, or host RAM > 110 GB
-
-colab --auth=oauth2 drivemount -s qwen-worker /content/drive
-
-colab --auth=oauth2 exec -s qwen-worker --timeout 86400 \
-  --env LLAMA_API_KEY="$LLAMA_API_KEY" \
-  -f start_server.py
-# keep this attached
-
-# every exit path, including Ctrl-C:
-colab --auth=oauth2 stop -s qwen-worker
-colab --auth=oauth2 sessions
-```
+### Fallback (Abliterated Flash-Next on G4)
+Follow [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md):
+If refusal mitigation is required, deploy an abliterated Flash-Next candidate on G4 using SGLang (same G4 provisioning and flags as primary, pointing `--model-path` to the selected abliterated checkpoint). See [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md).
 
 `colab exec` default `--timeout` is 30 s. Expiry does **not** kill guest processes; it only detaches the laptop. Always pass `--timeout 86400`.
 
@@ -119,7 +97,7 @@ Canonical storage path: `/content/drive/MyDrive/colab_llm/`.
 
 ### Drive caching strategy
 Cold boots on Google Colab burn expensive metered CUs on every session initialization. Caching artifacts directly on Google Drive cuts warm-boot latency to under 45 seconds:
-- **A100 Fallback**: Precompiled standalone binaries (`llama-server`, `llama-quantize`, `llama-bench` compiled with `-DBUILD_SHARED_LIBS=OFF`), the 16.8 GB `Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf` checkpoint, the 1.14 GB quantized sidecar `dflash-Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf`, and `cloudflared` are cached under `/content/drive/MyDrive/colab_llm/bin/` and root. On warm boot, `shutil.copy2` copies binaries to `/usr/local/bin/`, and `llama-server` reads weights directly from Drive via `--load-mode none`.
+- **Abliterated Fallback on G4**: If an abliterated candidate is selected ([`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md)), its weights (~105–112 GB) should be cached on Drive under `/content/drive/MyDrive/colab_llm/checkpoints/` similarly to the primary checkpoint to eliminate repeated large downloads.
 - **G4 Flash-Next**: The 132.7 GB safetensors checkpoint (`nvidia/Qwen3.8-Flash-Next-NVFP4`) is cached under `/content/drive/MyDrive/colab_llm/checkpoints/nvidia/Qwen3.8-Flash-Next-NVFP4/` to eliminate a 10–20 minute download penalty (~1.5–3.0 CU) on every session.
 
 ---
@@ -184,14 +162,7 @@ A 4-hour hard cutoff is enforced so unattended sessions never run overnight.
 
 Immediately execute `colab stop -s <session>` (or `runtime.unassign()` from the guest) if any hardware guard fails:
 
-### A100 SKU Guard (Fallback Track)
-Stop immediately if:
-- `nvidia-smi` reports ~80 GB (`A100-SXM4-80GB`).
-- `colab status` shows `HIGH_RAM`.
-- Host system RAM > 110 GB (A100 High-RAM is ~167 GB; Standard A100 is ~83.5 GB).
-- `colab usage` metered rate is High-RAM class (~6.77+ CU/hr on an A100 request). Extra VRAM is completely unneeded for 100K `q8_0` KV, and idle minutes cost 26% more.
-
-### G4 SKU Guard (Primary Track)
+### G4 SKU Guard
 Stop immediately if:
 - GPU is not confirmed as `NVIDIA RTX PRO 6000 Server Edition` (`sm_120`/`sm_120a`).
 - VRAM reported by `nvidia-smi` is not ~95.6 GiB (e.g., fallback to 24 GB L4 or 40 GB A100).
@@ -222,7 +193,7 @@ At 0 CU, the backend terminates the VM immediately and the trycloudflare URL die
 4. Browser profile: Dedicated profile where `authuser=0` is `zuluzain5@gmail.com` for interactive Drive grant.
 5. Provision target GPU:
    - Run G4 probe ([`runbooks/g4-probe.md`](runbooks/g4-probe.md)) to test G4 entitlement and host `mlock`.
-   - If G4 passes, serve via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md).
-   - If G4 is unentitled, rejected, or fails host `mlock`, serve via [`runbooks/fallback-27b.md`](runbooks/fallback-27b.md).
+   - If G4 passes, serve via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md) (or [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md) if refusal mitigation is required).
+   - If G4 is unentitled, rejected, or fails host `mlock`, Flash-Next on Colab is blocked; stop and report.
 6. Verify first-boot log greps, VRAM ceilings, and smoke curl gates.
 7. After work: Ensure session is unassigned and `colab --auth=oauth2 sessions` is empty.

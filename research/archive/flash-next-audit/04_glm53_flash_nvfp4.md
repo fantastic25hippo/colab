@@ -259,7 +259,7 @@ A complex multi-turn agent task producing ~80,000 output tokens precisely matche
    - *Chat / Prior Assumption*: Assumed uniform 4-bit representation across the entire network.
    - *Correction*: ModelOpt excludes vocabulary embeddings, language model head, attention sub-layers, and vision towers, preserving 16.46 billion parameters in BF16 (32.9 GB), plus FP8 group-16 scaling tensors (19 GB), driving actual weight footprint to 204.46 GB.
 3. **Colab Worker Strategy in `architecture.md`**:
-   - [`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L61-L80) focuses on serving an abliterated Qwen 3.8 27B model on single-GPU A100 (40 GB) or G4 (96 GB) using `llama.cpp`.
+   - [`architecture.md`](../27b-plan/architecture.md#L61-L80) focuses on serving an abliterated Qwen 3.8 27B model on single-GPU A100 (40 GB) or G4 (96 GB) using `llama.cpp`.
    - The findings in this report reinforce `architecture.md`: 300B+ MoE foundation models cannot be shoehorned into single-GPU Colab environments. Even with aggressive 4-bit quantization, frontier MoE weights exceed physical single-node Colab VRAM, confirming that local Colab workers must remain focused on ≤27B dense or ≤125B fine-grained sparse architectures (such as `Qwen3.8-Flash-Next-NVFP4`).
 
 ---

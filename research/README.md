@@ -1,6 +1,6 @@
 # Research Archive
 
-This directory tree is strictly an evidence and research archive. Shipping documentation at the repository root ([`README.md`](../README.md), [`decision.md`](../decision.md), [`claims-ledger.md`](../claims-ledger.md), [`ops.md`](../ops.md)) and in [`runbooks/`](../runbooks/) ([`g4-probe.md`](../runbooks/g4-probe.md), [`flash-next-sglang.md`](../runbooks/flash-next-sglang.md), [`fallback-27b.md`](../runbooks/fallback-27b.md)) are the canonical source of truth. When any archived paper or research note conflicts with a shipping document, the shipping document wins.
+This directory tree is strictly an evidence and research archive. Shipping documentation at the repository root ([`README.md`](../README.md), [`decision.md`](../decision.md), [`claims-ledger.md`](../claims-ledger.md), [`ops.md`](../ops.md)) and in [`runbooks/`](../runbooks/) ([`g4-probe.md`](../runbooks/g4-probe.md), [`flash-next-sglang.md`](../runbooks/flash-next-sglang.md), [`fallback-abliterated.md`](../runbooks/fallback-abliterated.md)) are the canonical source of truth. When any archived paper or research note conflicts with a shipping document, the shipping document wins.
 
 ## Archive Index
 

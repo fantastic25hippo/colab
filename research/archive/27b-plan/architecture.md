@@ -4,7 +4,7 @@ End-to-end plan for an uncensored Qwen 3.8 27B coding worker on Google Colab, pa
 
 Orchestration is local. Weights and a prebuilt `llama-server` live on Google Drive. The GPU boots, serves, then shuts down.
 
-Launch flags: [`inference.md`](inference.md). CLI and shutdown: [`ops.md`](ops.md). First sitting: [`first-boot.md`](first-boot.md).
+Launch flags: [`inference.md`](inference.md). CLI and shutdown: [`ops.md`](../../../ops.md). First sitting: [`first-boot.md`](first-boot.md).
 
 ---
 
@@ -105,7 +105,7 @@ Warm boot target: under 45 s after Drive is mounted (copy binary, point `-m` at 
 6. Local client talks OpenAI `/v1` at `https://<slug>.trycloudflare.com/v1` with `--api-key`.
 7. Every exit path: `colab stop -s qwen-worker`.
 
-Details in [`ops.md`](ops.md). Hermes, if used, gets an ephemeral config. Do not edit `~/.hermes/config.yaml`. Bend wiring is in [`bend-hands.md`](bend-hands.md).
+Details in [`ops.md`](../../../ops.md). Hermes, if used, gets an ephemeral config. Do not edit `~/.hermes/config.yaml`. Bend wiring is in [`bend-hands.md`](bend-hands.md).
 
 ---
 

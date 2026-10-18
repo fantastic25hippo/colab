@@ -9,7 +9,7 @@
 ## 1. Introduction & Methodology
 
 This document establishes the definitive, primary-source-grounded claims ledger for all technical, mathematical, architectural, and economic claims across the repository. It audits and reconciles the claims made in:
-- Root architectural specifications: `README.md`, `ops.md`, and archived `research/archive/27b-plan/` (`architecture.md`, `inference.md`, `first-boot.md`, `bend-hands.md`, and `plan_audit_and_fixes.md`)
+- Root architectural specifications: `README.md`, `ops.md`, and archived `research/archive/27b-plan/` (`architecture.md`, `inference.md`, `first-boot.md`, `bend-hands.md`, `plan_audit_and_fixes.md`, and historical `fallback-27b.md`)
 - Gemini chat trace: `research/archive/flash-next-chat.md`
 - Research synthesis dossiers: `research/archive/flash-next-audit/` (all 10 research papers, `README.md`, and `CLAIMS.md`)
 - Technical research notes: `research/` (`a100_speed_and_session.md`, `blueprint.md`, `busy_gpu.md`, `drive_files.md`, `kernel_and_cli.md`, `llamacpp_flags.md`, `qwen38_27b_max_tokens_per_second_deep_research.md`, `sidecar_and_verify.md`)
@@ -73,7 +73,7 @@ All search wrapper URLs and local file path links have been eliminated and repla
 
 ---
 
-### Group 3: Qwen3.8-27B Fallback & Baseline (27B Fallback)
+### Group 3: Historical 27B baseline (no longer the live fallback)
 
 | ID | Claim | Status | Corrected Value | Primary Source URL | Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -220,7 +220,7 @@ All search wrapper URLs and local file path links have been eliminated and repla
 | **Q6** | Thinking behavior vs `--reasoning off` | **verified** | Flash-Next is tuned for extended reasoning; forcing empty think tags can trigger plain-text fallback (`QwenLM/Qwen3.8#236`). | https://github.com/QwenLM/Qwen3.8/issues/236 | Known upstream template issue. |
 | **Q7** | Context window spec vs 27B | **verified** | Both models support 262,144 tokens native context. | https://huggingface.co/Qwen/Qwen3.8-Flash-Next | Verified identical context length specification. |
 | **Q8** | Refusal / safety behavior of NVIDIA checkpoint vs Blackfrost ABLITERATED | **verified** | Official NVIDIA checkpoint is safety aligned on Nemotron data and enforces refusals; Blackfrost is abliterated. | https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4 | Verified safety alignment on official checkpoint. |
-| **Q9** | Switching worker to Flash-Next justified | **unverified** | Operator intent, not a static fact. Leading candidate: Flash Next NVFP4 on G4 (stock + abliterated as needed). Fallback: Blackfrost Qwen3.8-27B ABLITERATED Q4_K_M on A100. Evaluated dynamically based on live runtime viability and alignment constraints; do not conclude "do not switch". | https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-Flash-Next | Strategy balances leading candidate (Flash-Next on G4) against fallback (27B on A100). |
+| **Q9** | Switching worker to Flash-Next justified | **unverified** | Operator intent, not a static fact. Primary candidate: Flash-Next NVFP4 on G4 (`nvidia` or `RadixArk`). Fallback: abliterated Flash-Next checkpoint (TBD, unverified; candidates: `edp1096`, `claidler`, `Alexsi98`). Historical note: Blackfrost Qwen3.8-27B ABLITERATED on A100 was the previous historical fallback, now archived. Evaluated dynamically based on live runtime viability and alignment constraints; do not conclude "do not switch". | https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-Flash-Next | Primary candidate is Flash-Next on G4; fallback is abliterated Flash-Next (historical 27B fallback archived). |
 | **Q10** | Known issues: routing instability, QSA quality drop, NVFP4 accuracy | **verified** | NVFP4 accuracy drop is <0.6%, but 512-expert routing and dynamic QSA indexers add runtime complexity. | https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4 | Verified model stability notes. |
 
 ---

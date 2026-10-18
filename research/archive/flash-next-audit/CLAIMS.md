@@ -27,7 +27,7 @@ not one consistent model.
 | H12 | Colab bills **connected wall-clock**, including idle GPU time, not tokens. |
 | H13 | Colab AI Pro / this account can actually assign a G4. |
 | H14 | G4 is Blackwell `sm_120` with native NVFP4 tensor cores. |
-| H15 | Existing repo figure **~8.71 CU/hr** for G4 is wrong, or the chat’s **6.4–6.7** is wrong. Resolve the conflict with [`../architecture.md`](../architecture.md). |
+| H15 | Existing repo figure **~8.71 CU/hr** for G4 is wrong, or the chat’s **6.4–6.7** is wrong. Resolve the conflict with [`../27b-plan/architecture.md`](../27b-plan/architecture.md). |
 | H16 | Existing repo figure **1,792 GB/s** is the Workstation card, **1,597 GB/s** is Colab Server Edition. Confirm which SKU Colab G4 is. |
 
 ---

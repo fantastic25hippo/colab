@@ -89,7 +89,7 @@ print("Drive successfully mounted at /content/drive.")
 
 ## 4. Compilation with Warm-Boot Portability
 
-Fold in fixes from [`plan_audit_and_fixes.md`](../research/archive/27b-plan/plan_audit_and_fixes.md):
+Fold in fixes from [`plan_audit_and_fixes.md`](plan_audit_and_fixes.md):
 1. `-DBUILD_SHARED_LIBS=OFF`: Links `libllama` and `libggml` statically so precompiled binaries cached on Drive execute seamlessly on future warm VMs without `error while loading shared libraries`.
 2. Fatbin targets: `-DCMAKE_CUDA_ARCHITECTURES="80-real;120a-real"` (A100 `sm_80` and G4 `sm_120a`).
 3. Binary targets: `--target llama-server llama-quantize llama-bench`.
@@ -409,7 +409,7 @@ curl -sf "${LLAMA_URL}/v1/chat/completions" \
 ```
 
 ### Curl 2: Restored Full Payload Testing `cache_n > 0` & `ngram-map-k4v`
-Fold in fix from [`plan_audit_and_fixes.md`](../research/archive/27b-plan/plan_audit_and_fixes.md) §2.3:
+Fold in fix from [`plan_audit_and_fixes.md`](plan_audit_and_fixes.md) §2.3:
 - Preceded by a 1-token prefix seed turn to warm slot 0.
 - Restores the full 28-line `TokenBucketRateLimiter` class in the assistant turn (eliminating the truncated `...` stub so `k4v` can extract 4-gram matches).
 **Gate**: `predicted_per_second > Curl 1` and `cache_n > 0`.

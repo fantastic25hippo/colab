@@ -13,20 +13,20 @@ The chat's "race-to-sleep" thesis is mathematically sound **only** for strictly 
 | ID | Chat claim | Label | Corrected value | Source URL |
 | :--- | :--- | :--- | :--- | :--- |
 | **E1** | Same GPU, faster model → fewer CUs for a fixed automated token job ("race to sleep"). | **CONFIRMED** | True strictly for headless automated runs with immediate teardown (`runtime.unassign()`); false for interactive sessions where human idle dominates. | [Google Colab FAQ](https://colab.research.google.com/faq) |
-| **E2** | 60,000 generated tokens: 27B ~140 tok/s → 7.1 min → 0.77 CU; Flash-Next ~300 tok/s → 3.3 min → 0.36 CU. | **PARTIALLY TRUE** | Arithmetic matches at 6.55 CU/hr, but completely omits prompt prefill. At 8.71 CU/hr: 27B = 1.04 CU; Flash-Next = 0.48 CU. Adding 10k prompt prefill increases duration and CUs by 2–5%. | [architecture.md](file:///home/sahil/Desktop/sahil/colab/architecture.md#L68) |
-| **E3** | Interactive 1-hour sitting burns ~6.5 CU on G4 regardless of model (idle dominates). | **CONFIRMED** | Billed on connected wall-clock: burns 6.55 CU/hr (chat rate) or 8.71 CU/hr ([`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L68)) regardless of GPU utilization or token generation speed. | [Google Colab FAQ](https://colab.research.google.com/faq) |
-| **E4** | 25-turn agent task: 27B 14–18 s/turn, 6.5–7.5 min, 0.75–0.81 CU; Flash-Next 4–6 s/turn, 1.8–2.5 min, 0.20–0.27 CU. | **PARTIALLY TRUE** | Chat arithmetic holds at 6.55 CU/hr assuming uncached prefill of 4k–12k tokens. At 8.71 CU/hr: 27B burns 0.94–1.09 CU; Flash-Next burns 0.26–0.36 CU. | [architecture.md](file:///home/sahil/Desktop/sahil/colab/architecture.md#L68) |
+| **E2** | 60,000 generated tokens: 27B ~140 tok/s → 7.1 min → 0.77 CU; Flash-Next ~300 tok/s → 3.3 min → 0.36 CU. | **PARTIALLY TRUE** | Arithmetic matches at 6.55 CU/hr, but completely omits prompt prefill. At 8.71 CU/hr: 27B = 1.04 CU; Flash-Next = 0.48 CU. Adding 10k prompt prefill increases duration and CUs by 2–5%. | [architecture.md](../27b-plan/architecture.md#L68) |
+| **E3** | Interactive 1-hour sitting burns ~6.5 CU on G4 regardless of model (idle dominates). | **CONFIRMED** | Billed on connected wall-clock: burns 6.55 CU/hr (chat rate) or 8.71 CU/hr ([`architecture.md`](../27b-plan/architecture.md#L68)) regardless of GPU utilization or token generation speed. | [Google Colab FAQ](https://colab.research.google.com/faq) |
+| **E4** | 25-turn agent task: 27B 14–18 s/turn, 6.5–7.5 min, 0.75–0.81 CU; Flash-Next 4–6 s/turn, 1.8–2.5 min, 0.20–0.27 CU. | **PARTIALLY TRUE** | Chat arithmetic holds at 6.55 CU/hr assuming uncached prefill of 4k–12k tokens. At 8.71 CU/hr: 27B burns 0.94–1.09 CU; Flash-Next burns 0.26–0.36 CU. | [architecture.md](../27b-plan/architecture.md#L68) |
 | **E5** | Tasks per 100 CU: ~125 (27B) vs ~400+ (Flash-Next). | **PARTIALLY TRUE** | At 6.55 CU/hr: 123–133 vs 370–500 tasks. At 8.71 CU/hr: 92–106 tasks (27B) vs 275–385 tasks (Flash-Next). Under realistic 150 tok/s decode: ~180 tasks for Flash-Next. | [Colab Pay-As-You-Go](https://colab.research.google.com/signup) |
 | **E6** | Prefill of growing 20K+ history becomes the silent killer by turn 15. | **PARTIALLY TRUE** | True only when prompt history is uncached or cache-busted. With prefix caching (RadixAttention/vLLM), prefill is restricted to delta tokens (<1k tokens/turn, <0.15 s). | [vLLM Prefix Caching](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html) |
-| **E7** | G4 vs L4 20-turn loop: G4 ~3.7 s/turn, 1.23 min, 0.133 CU; L4 14B ~29.6 s/turn, 9.87 min, 0.345 CU. | **PARTIALLY TRUE** | Arithmetic holds at G4=6.55 CU/hr and L4=2.1 CU/hr. At [architecture.md](file:///home/sahil/Desktop/sahil/colab/architecture.md#L70) rates (G4=8.71, L4=1.71): G4 burns 0.179 CU; L4 burns 0.282 CU. Apples-to-oranges architectural comparison. | [architecture.md](file:///home/sahil/Desktop/sahil/colab/architecture.md#L65-L71) |
+| **E7** | G4 vs L4 20-turn loop: G4 ~3.7 s/turn, 1.23 min, 0.133 CU; L4 14B ~29.6 s/turn, 9.87 min, 0.345 CU. | **PARTIALLY TRUE** | Arithmetic holds at G4=6.55 CU/hr and L4=2.1 CU/hr. At [architecture.md](../27b-plan/architecture.md#L70) rates (G4=8.71, L4=1.71): G4 burns 0.179 CU; L4 burns 0.282 CU. Apples-to-oranges architectural comparison. | [architecture.md](../27b-plan/architecture.md#L65-L71) |
 | **E8** | L4 14B prefill 15K ~1,200 tok/s; decode ~35 tok/s. | **CONFIRMED** | Matches realistic roofline for 14B dense FP8/INT4 streaming across L4's 300 GB/s bandwidth. | [NVIDIA L4 Datasheet](https://www.nvidia.com/en-us/data-center/l4/) |
-| **E9** | G4 Flash-Next prefill 15K ~8,000 tok/s; decode ~320 tok/s. | **PARTIALLY TRUE** | Assumes peak MTP draft acceptance (>75%) and sparse attention. If MTP is unoptimized or code entropy is high, decode drops to 150–220 tok/s. | [Job 05 Speed Roofline](file:///home/sahil/Desktop/sahil/colab/Research%20on%20Qwen%20Flash%20Next/CLAIMS.md#L90-L141) |
+| **E9** | G4 Flash-Next prefill 15K ~8,000 tok/s; decode ~320 tok/s. | **PARTIALLY TRUE** | Assumes peak MTP draft acceptance (>75%) and sparse attention. If MTP is unoptimized or code entropy is high, decode drops to 150–220 tok/s. | [Job 05 Speed Roofline](CLAIMS.md#L90-L141) |
 | **E10** | Smaller models incur an "agent failure tax" (more turns). | **CONFIRMED** | Well-documented in benchmark literature; 7B/14B models average 2.5–3.5× more turns on SWE-bench / tool-use benchmarks due to syntax errors and hallucinated parameters. | [SWE-bench](https://www.swebench.com/) |
 | **E11** | Workload 37M cache-hit + 2M cache-miss + 1M output on Flash-Next G4 burns 5.4–7.5 CU (avg ~6.8), 50–65 min. | **INDEPENDENT CALC** | Chat reproduces at 6.55 CU/hr, but relies on artificial 100k–200k tok/s "cache-hit binding". With instant prefix skips, wall time is 56.0 min (6.11 CU @ 6.55 CU/hr; 8.13 CU @ 8.71 CU/hr). | [vLLM Prefix Caching](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html) |
-| **E12** | If 37M were all misses, extra ~72+ min and ~8 CU. | **PARTIALLY TRUE** | 37M / 8,500 tok/s = 72.55 min. At 6.55 CU/hr this is 7.92 CU; at 8.71 CU/hr this is 10.53 CU. If cache hits previously took 4.6 min, net delta is +67.9 min (+7.41 CU). | [architecture.md](file:///home/sahil/Desktop/sahil/colab/architecture.md#L68) |
+| **E12** | If 37M were all misses, extra ~72+ min and ~8 CU. | **PARTIALLY TRUE** | 37M / 8,500 tok/s = 72.55 min. At 6.55 CU/hr this is 7.92 CU; at 8.71 CU/hr this is 10.53 CU. If cache hits previously took 4.6 min, net delta is +67.9 min (+7.41 CU). | [architecture.md](../27b-plan/architecture.md#L68) |
 | **E13** | Equivalent API cost $15–$35+ vs Colab < $1 for ~7 CU. | **PARTIALLY TRUE** | $15–$35 reflects commercial frontier APIs (e.g. Claude 3.5 Sonnet / GPT-4o with caching). 7 CUs costs $0.70 at Colab retail overage ($9.99/100 CUs) or $0 marginal within bundled quota, but setup/engineering overhead is excluded. | [Google Colab Pricing](https://colab.research.google.com/signup) |
 | **E14** | Decode is >80% of billed time in that 40M-token mix. | **CONFIRMED** | 1M output tokens takes 47.6–55.5 min out of 54–66 min (83.8%–88.1% of total session time). If prefix hits are near-instant, decode accounts for 93.1% of runtime. | [vLLM Benchmarks](https://docs.vllm.ai/) |
-| **E15** | 200 CU/month → ~30.5 hours at 6.4–6.7 CU/hr. | **CONFIRMED** | 200 CU / 6.55 CU/hr = 30.53 hours. At 8.71 CU/hr ([`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L68)), 200 CUs yields only 22.96 hours. | [Google One AI Premium](https://one.google.com/about/ai-premium) |
+| **E15** | 200 CU/month → ~30.5 hours at 6.4–6.7 CU/hr. | **CONFIRMED** | 200 CU / 6.55 CU/hr = 30.53 hours. At 8.71 CU/hr ([`architecture.md`](../27b-plan/architecture.md#L68)), 200 CUs yields only 22.96 hours. | [Google One AI Premium](https://one.google.com/about/ai-premium) |
 | **E16** | Same 92.5/5.0/2.5 split, 200 CU yields 1.18B / 1.42B / 1.69B / 1.94B total tokens at 320/400/500/600 decode tok/s. | **INDEPENDENT CALC** | Chat arithmetic verified at 6.55 CU/hr with 10.1 min prompt overhead. At 8.71 CU/hr, monthly tokens drop to 0.89B / 1.06B / 1.27B / 1.45B. | [Google Colab Pricing](https://colab.research.google.com/signup) |
 | **E17** | Recalculate E2, E4, E7, E11, E15, E16 from first principles. Show CU = hours × rate. | **INDEPENDENT CALC** | Complete recalculation demonstrated across all parameter, rate, and latency variations. | Derived below |
 | **E18** | Google AI Pro 200 CU/month pool still exists and G4 is billable from it. | **PARTIALLY TRUE** | Google AI Pro ($19.99/mo) bundles 200 CUs/month. However, G4 availability on AI Pro is non-guaranteed and often grayed out (often requiring AI Ultra or Colab Pro+). | [Google One AI Premium FAQ](https://support.google.com/googleone/answer/16287313) |
@@ -60,7 +60,7 @@ $$\text{Time}_{\text{Flash-Next}} = \frac{60{,}000}{300} = 200.00\text{ s} = 3.3
 $$\text{CU}_{\text{Flash-Next @ 6.55}} = 0.05556 \times 6.55 = 0.3639\text{ CU}$$
 
 #### Critical Flaws in the Chat Claim
-1. **Contested Hourly Rate:** Using the documented [`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L68) rate of **8.71 CU/hr**, the burn jumps to **1.037 CU** for 27B and **0.484 CU** for Flash-Next (+33% increase).
+1. **Contested Hourly Rate:** Using the documented [`architecture.md`](../27b-plan/architecture.md#L68) rate of **8.71 CU/hr**, the burn jumps to **1.037 CU** for 27B and **0.484 CU** for Flash-Next (+33% increase).
 2. **Omission of Prompt Prefill:** Generating 60,000 tokens is never an isolated decode workload. In practical code generation or automated refactoring, generating 60k tokens across multiple files typically involves ingesting at least 15,000–30,000 prompt tokens. At 8,000 tok/s prefill, an extra 20k prompt ingestion adds 2.5 seconds, while at 3,000 tok/s (dense 27B) it adds 6.7 seconds. While decode still dominates, treating prefill as 0.00 s is physically impossible.
 
 ### 3. Agent-Loop Dynamics: 25 Turns, Context Bloat, and Prefix Caching (E4, E5, E6)
@@ -203,7 +203,7 @@ Comparing G4 (Flash-Next) against L4 (14B Dense) across both contested pricing r
 | **L4: Flash-Next (Offloaded)** | $>60\text{ s}$ (PCIe bottleneck) | $>100\text{ s}$ (@ <6 tok/s) | $>160\text{ s}$ | $>3{,}200\text{ s}$ (>53 min) | **>1.86 CU** | **>1.52 CU** |
 
 #### Key Takeaway on G4 vs L4
-When using [`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L65-L71) rates (G4=8.71, L4=1.71), G4's hourly cost is **5.09×** L4's cost (not the chat's 3.1×). Under conservative decode speeds (150 tok/s), G4 Flash-Next burns **0.315 CU**, which actually **exceeds** L4 14B's burn of **0.282 CU**! The "budget GPU trap" only favors G4 if Flash-Next achieves its aggressive >300 tok/s decode speculation.
+When using [`architecture.md`](../27b-plan/architecture.md#L65-L71) rates (G4=8.71, L4=1.71), G4's hourly cost is **5.09×** L4's cost (not the chat's 3.1×). Under conservative decode speeds (150 tok/s), G4 Flash-Next burns **0.315 CU**, which actually **exceeds** L4 14B's burn of **0.282 CU**! The "budget GPU trap" only favors G4 if Flash-Next achieves its aggressive >300 tok/s decode speculation.
 
 ### 7. Economic Realities: The API vs. Colab Accounting Arbitrage (E13)
 
@@ -254,15 +254,15 @@ While 7 CUs indeed corresponds to ~$0.70–$0.81 in raw unit valuation, the clai
 ## Conflicts with architecture.md / prior research/
 
 1. **G4 Hourly Burn Rate (H15 Conflict):**
-   - [`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L68) explicitly records Colab G4 at **~8.71 CU/hr**.
+   - [`architecture.md`](../27b-plan/architecture.md#L68) explicitly records Colab G4 at **~8.71 CU/hr**.
    - The chat consistently calculates using **6.4–6.7 CU/hr** (midpoint 6.55 CU/hr).
    - This represents a **33% discrepancy**. At 8.71 CU/hr, all completed tasks, monthly token budgets, and runtime capacities are reduced by 25%.
 2. **L4 Hourly Burn Rate:**
-   - [`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L70) records L4 at **~1.71 CU/hr**.
+   - [`architecture.md`](../27b-plan/architecture.md#L70) records L4 at **~1.71 CU/hr**.
    - The chat calculates L4 at **~2.1 CU/hr**.
    - At 1.71 CU/hr, L4 is substantially cheaper, making small dense models much more competitive against G4.
 3. **Primary Recommendation (A100 vs G4):**
-   - [`architecture.md`](file:///home/sahil/Desktop/sahil/colab/architecture.md#L67-L74) designates **A100-SXM4-40GB** (~5.37–5.40 CU/hr, 1,555 GB/s) as the primary target for the coding worker, noting that G4 is "often grayed on AI Pro."
+   - [`architecture.md`](../27b-plan/architecture.md#L67-L74) designates **A100-SXM4-40GB** (~5.37–5.40 CU/hr, 1,555 GB/s) as the primary target for the coding worker, noting that G4 is "often grayed on AI Pro."
    - The chat assumes G4 is readily available and the default choice.
 
 ---
@@ -283,5 +283,5 @@ While 7 CUs indeed corresponds to ~$0.70–$0.81 in raw unit valuation, the clai
 - [NVIDIA L4 Tensor Core GPU Datasheet](https://www.nvidia.com/en-us/data-center/l4/)
 - [vLLM Automatic Prefix Caching Documentation](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html)
 - [SWE-bench Benchmark & Leaderboard](https://www.swebench.com/)
-- [Project Architecture Specification](file:///home/sahil/Desktop/sahil/colab/architecture.md)
-- [Project Claims Ledger](file:///home/sahil/Desktop/sahil/colab/Research%20on%20Qwen%20Flash%20Next/CLAIMS.md)
+- [Project Architecture Specification](../27b-plan/architecture.md)
+- [Project Claims Ledger](CLAIMS.md)

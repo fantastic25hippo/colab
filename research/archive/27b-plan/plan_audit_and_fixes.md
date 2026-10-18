@@ -1,8 +1,8 @@
 # Colab Qwen 3.8 27B Worker Plan: Technical Audit, Performance Leaks, and Required Doc Fixes
 
 **Target Repository:** Colab Qwen Worker (`README.md`, `architecture.md`, `inference.md`, `ops.md`, `first-boot.md`, `bend-hands.md`)  
-**Target Stack:** [Blackfrost-AI/Qwen3.8-27B-ABLITERATED-GGUF](https://www.google.com/search?q=https%3A%2F%2Fhuggingface.co%2FBlackfrost-AI%2FQwen3.8-27B-ABLITERATED-GGUF) (`Q4_K_M`) + Quantized Blackfrost DFlash 2 (`Q4_K_M`) + `ngram-map-k4v` on [ggml-org/llama.cpp](https://www.google.com/search?q=https%3A%2F%2Fgithub.com%2Fggml-org%2Fllama.cpp) (`efe3626` / `b11552`)  
-**Target Runtime:** Google Colab `NVIDIA A100-SXM4-40GB` via [google-colab-cli](https://www.google.com/search?q=https%3A%2F%2Fgithub.com%2Fgooglecolab%2Fgoogle-colab-cli) `0.7.4` on [Google AI Pro](https://support.google.com/googleone/answer/16287313) (200 CU/month)
+**Target Stack:** [Blackfrost-AI/Qwen3.8-27B-ABLITERATED-GGUF](https://huggingface.co/Blackfrost-AI/Qwen3.8-27B-ABLITERATED-GGUF) (`Q4_K_M`) + Quantized Blackfrost DFlash 2 (`Q4_K_M`) + `ngram-map-k4v` on [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) (`efe3626` / `b11552`)  
+**Target Runtime:** Google Colab `NVIDIA A100-SXM4-40GB` via [google-colab-cli](https://github.com/googlecolab/google-colab-cli) `0.7.4` on [Google AI Pro](https://support.google.com/googleone/answer/16287313) (200 CU/month)
 
 ## 1. Architecture and Economics Verdict: The Core Plan Is Sound
 

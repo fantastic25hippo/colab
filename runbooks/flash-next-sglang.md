@@ -66,8 +66,8 @@ The official SGLang cookbook specifies distinct launch requirements depending on
 | Setting / Flag | NVIDIA (`nvidia/Qwen3.8-Flash-Next-NVFP4`) | RadixArk (`RadixArk/Qwen3.8-Flash-Next-NVFP4`) |
 | :--- | :--- | :--- |
 | **Quantization Format** | `modelopt_mixed` (mixed precision: linear attn/embed in FP8/BF16, MoE in NVFP4) | `modelopt_fp4` (uniform FP4 MoE) |
-| **`--quantization` flag** | **DO NOT PASS** (Passing `--quantization` causes loader failure) | `--quantization modelopt_fp4` |
-| **Docker Container** | `lmsysorg/sglang:dev-qwen38-next-local` (requires PR #38121) | Standard SGLang release with FP4 support |
+| **`--quantization` flag** | **DO NOT PASS** (Quantization is auto-detected from checkpoint config; passing `--quantization` causes loader failure) | **DO NOT PASS** (Cookbook passes no `--quantization` flag for either export) |
+| **Docker Container** | `lmsysorg/sglang:dev-qwen38-next-local` (requires PR #38121) | `lmsysorg/sglang:dev-qwen38-next-local` (or standard release with FP4 support) |
 | **Tensor Parallelism** | `--tp 1` (verified single RTX PRO 6000 execution) | `--tp 1` |
 | **Host PLE Offload** | `--ple-offload-embedding` | `--ple-offload-embedding` |
 | **Host Memory Requirement** | `>= 64 GB free host RAM` (Colab G4 has ~177 GB host RAM) | `>= 64 GB free host RAM` |
@@ -76,13 +76,14 @@ The official SGLang cookbook specifies distinct launch requirements depending on
 ### Option A: Docker Launch (Cookbook Verified Method)
 
 > [!WARNING]
-> **Colab Docker Availability is UNVERIFIED**: Standard Colab VMs often do not provide a running Docker daemon or have Docker installed. The official SGLang cookbook verified path is Docker with `--ulimit memlock=-1`. Both Docker availability and native host memory pinning (`mlock`) must be probed via [`g4-probe.md`](g4-probe.md). If Docker is unavailable and native `mlock` fails, pivot to the A100 fallback ([`fallback-27b.md`](fallback-27b.md)).
+> **Colab Docker Availability is UNVERIFIED**: Standard Colab VMs often do not provide a running Docker daemon or have Docker installed. The official SGLang cookbook verified path is Docker with `--ulimit memlock=-1`. Both Docker availability and native host memory pinning (`mlock`) must be probed via [`g4-probe.md`](g4-probe.md). G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report.
 
 ```bash
 # Launch inside Docker with unlimited memlock for host PLE pinning (if Docker is present)
 docker run --gpus all \
   --shm-size 32g \
   --ulimit memlock=-1 \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   -p 30000:30000 \
   -v /content/drive/MyDrive/colab_llm:/colab_llm \
   lmsysorg/sglang:dev-qwen38-next-local \
@@ -93,28 +94,63 @@ docker run --gpus all \
     --host 0.0.0.0 \
     --port 30000 \
     --api-key "${LLAMA_API_KEY}" \
-    --mem-fraction-static 0.90 \
+    --mem-fraction-static 0.96 \
+    --speculative-algorithm NEXTN \
+    --speculative-num-steps 3 \
+    --speculative-num-draft-tokens 4 \
+    --speculative-eagle-topk 1 \
     --trust-remote-code
 ```
 
 > [!NOTE]
-> For RadixArk, append `--quantization modelopt_fp4` and update `--model-path` to the RadixArk directory.
+> - **Throughput Expectations**: Expect **~148 tok/s** with MTP (`--mem-fraction-static 0.96`) and **~83 tok/s** without MTP (`--mem-fraction-static 0.93`).
+> - **Cookbook Quantization Matching**: The cookbook passes no `--quantization` flag for either export (NVIDIA or RadixArk). For RadixArk, simply point `--model-path` to the RadixArk directory.
 
 ### Option B: Native Host Launch (Subject to Native `mlock` Probe)
 
 If the probe in [`g4-probe.md`](g4-probe.md) confirms native host `mlock` permission without Docker:
 
+#### 1. Install SGLang from Source (UNVERIFIED on Colab CUDA 13 / sm_120)
+Native host execution requires building SGLang from source to include the Flash-Next mixed precision loader from PR #38121 (or the commit in `lmsysorg/sglang:dev-qwen38-next-local`):
+
 ```bash
+# Install SGLang from source with PR #38121 (UNVERIFIED on Colab CUDA 13 / sm_120)
+git clone https://github.com/sgl-project/sglang.git
+cd sglang
+git fetch origin pull/38121/head:pr-38121 && git checkout pr-38121
+pip install -e "python[all]"
+```
+
+> [!WARNING]
+> **Drive Mount I/O Bottleneck:** Loading the 133 GB checkpoint directly from the Google Drive FUSE mount (`/content/drive`) is slow and can take 20–40+ minutes due to FUSE overhead. If local disk has sufficient space (`df -h /content` shows >= 150 GB free), copy the checkpoint to local disk before launching:
+> ```bash
+> df -h /content
+> cp -r /content/drive/MyDrive/colab_llm/checkpoints/nvidia/Qwen3.8-Flash-Next-NVFP4 /content/Qwen3.8-Flash-Next-NVFP4
+> ```
+
+#### 2. Native Launch Command
+
+```bash
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# If local copy ran, use /content/Qwen3.8-Flash-Next-NVFP4; otherwise keep the Drive path (/content/drive/MyDrive/colab_llm/checkpoints/nvidia/Qwen3.8-Flash-Next-NVFP4).
 python3 -m sglang.launch_server \
-  --model-path /content/drive/MyDrive/colab_llm/checkpoints/nvidia/Qwen3.8-Flash-Next-NVFP4 \
+  --model-path /content/Qwen3.8-Flash-Next-NVFP4 \
   --tp 1 \
   --ple-offload-embedding \
   --host 0.0.0.0 \
   --port 30000 \
   --api-key "${LLAMA_API_KEY}" \
-  --mem-fraction-static 0.90 \
+  --mem-fraction-static 0.96 \
+  --speculative-algorithm NEXTN \
+  --speculative-num-steps 3 \
+  --speculative-num-draft-tokens 4 \
+  --speculative-eagle-topk 1 \
   --trust-remote-code > /tmp/sglang.log 2>&1 &
 ```
+
+> [!NOTE]
+> Expect **~148 tok/s** with MTP (`--mem-fraction-static 0.96`) and **~83 tok/s** without MTP (`--mem-fraction-static 0.93`). Cookbook passes no `--quantization` flag for either export.
 
 ---
 

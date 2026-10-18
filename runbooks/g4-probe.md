@@ -40,7 +40,8 @@ colab --auth=oauth2 whoami
 # Verify zero lingering active sessions
 colab --auth=oauth2 sessions
 
-# Check existing CU balance before provisioning
+# Check existing CU balance and record timestamp before provisioning
+date -u +"%Y-%m-%dT%H:%M:%SZ"
 colab --auth=oauth2 usage
 ```
 
@@ -59,7 +60,7 @@ colab --auth=oauth2 new -s g4-probe --gpu G4
   If the CLI returns an entitlement error, quota denial, or unsupported accelerator message:
   1. Record the exact error string.
   2. Conclude G4 is unentitled for this AI Pro tier.
-  3. Abort G4 deployment immediately and pivot to the verified A100 40GB fallback ([`fallback-27b.md`](fallback-27b.md)).
+  3. G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report.
 - **Case B: Session Assigned**:
   Proceed immediately to Step 4.
 
@@ -115,7 +116,9 @@ else
     echo "DOCKER STATUS: Docker is NOT installed on this Colab VM."
 fi
 
-echo -e "\n=== RLIMIT_MEMLOCK & NATIVE MLOCK PROBE ==="
+echo -e "\n=== RLIMIT_MEMLOCK & ULIMIT PROBE ==="
+ulimit -l
+
 python3 -c '\''
 import os, sys, resource, ctypes
 
@@ -137,34 +140,35 @@ try:
     if res == 0:
         print(f"SUCCESS: Successfully pinned {TARGET_GIB} GiB host RAM with mlock!")
         libc.munlock(ctypes.byref(addr), ctypes.c_size_t(len(buf)))
-        sys.exit(0)
     else:
         err = ctypes.get_errno()
         print(f"FAILED: libc.mlock returned {res} (errno {err}: {os.strerror(err)})")
         print("RESULT: Native mlock failed. Docker container with --ulimit memlock=-1 is required if Docker is available.")
-        sys.exit(1)
 except MemoryError:
     print("FAILED: Host MemoryError during allocation.")
-    sys.exit(2)
 except Exception as e:
     print(f"FAILED: Exception encountered: {e}")
-    sys.exit(3)
 '\''
+
+echo -e "\n=== CUDA HOST MEMORY PINNING (torch.pin_memory) PROBE ==="
+# libc mlock alone does not prove CUDA page-locked memory registration
+python3 -c "import torch,time;t=time.time();x=torch.empty(48*2**30,dtype=torch.uint8).pin_memory();print('pinned OK',time.time()-t)"
 '
 ```
 
 ### Result Analysis:
-- If `mlock` succeeds: Native SGLang execution outside Docker is viable.
-- If `mlock` fails but Docker daemon is active: SGLang can be launched inside Docker using `docker run --gpus all --ulimit memlock=-1`.
-- If both `mlock` and Docker fail: SGLang cannot pin the 47.7 GiB PLE table on this G4 VM; pivot immediately to the verified A100 fallback ([`fallback-27b.md`](fallback-27b.md)).
+- If `mlock` and `pin_memory` succeed: Native SGLang execution outside Docker is viable.
+- If native pinning fails but Docker daemon is active: SGLang can be launched inside Docker using `docker run --gpus all --ulimit memlock=-1`.
+- If both native pinning and Docker fail: G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report.
 
 ---
 
 ## 6. Real Metered Rate Verification
 
-Check the metered hourly burn rate reported by the Colab backend:
+Check the metered hourly burn rate reported by the Colab backend, recording the exact timestamp:
 
 ```bash
+date -u +"%Y-%m-%dT%H:%M:%SZ"
 colab --auth=oauth2 usage
 ```
 
@@ -179,17 +183,24 @@ Cross-check via Web UI if browser profile `zuluzain5@gmail.com` is active:
 
 ## 7. Immediate Teardown
 
-Do not allow the probe instance to idle. At 8.71 CU/hr, idling burns ~0.145 CU every minute.
+> [!CAUTION]
+> **Stop/unassign must run on every path** (whether pass, fail, error, or timeout). Keep the probe strictly under **~10 minutes** (burning ≤1.45 CU total). Record timestamps and `colab usage` before and after.
 
 ```bash
+# Record usage and timestamp immediately before teardown
+date -u +"%Y-%m-%dT%H:%M:%SZ"
+colab --auth=oauth2 usage
+
 # Terminate session from workstation
 colab --auth=oauth2 stop -s g4-probe
 
-# Verify clean state
+# Verify clean state and record post-teardown balance
 colab --auth=oauth2 sessions
+date -u +"%Y-%m-%dT%H:%M:%SZ"
+colab --auth=oauth2 usage
 ```
 
-Alternatively, from within the guest:
+Alternatively, from within the guest (runs on all exit paths in automation):
 ```python
 from google.colab import runtime
 runtime.unassign()
@@ -201,10 +212,10 @@ runtime.unassign()
 
 | Probe Item | Expected Value | Pass Next Step | Fail Remediation |
 | :--- | :--- | :--- | :--- |
-| **G4 Provisioning** | Session created | Proceed to hardware check | Fall back to A100 40GB ([`fallback-27b.md`](fallback-27b.md)) |
+| **G4 Provisioning** | Session created | Proceed to hardware check | G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report. |
 | **GPU Name** | RTX PRO 6000 Server Edition | Proceed to VRAM check | Terminate session immediately (`colab stop`) |
 | **VRAM Capacity** | ~95.6 GiB (`nvidia-smi`) | Proceed to Host RAM check | Stop immediately; SKU mismatch |
 | **Host System RAM** | ~177 GB (`free -g`) | Proceed to mlock & docker probe | Stop immediately; insufficient RAM for PLE |
-| **Docker Availability** | Daemon active & GPU accessible | Docker `--ulimit memlock=-1` path verified | Native `mlock` required |
-| **Native mlock** | 50 GiB pinned | Native SGLang permitted | Docker `--ulimit memlock=-1` required (or fall back to A100) |
+| **Docker Availability** | Daemon active & GPU accessible | Docker `--ulimit memlock=-1` path verified | Native `mlock` / `pin_memory` required |
+| **Native mlock / CUDA Pinning** | 48 GiB pinned OK | Native SGLang permitted | Docker `--ulimit memlock=-1` required; if unavailable: G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report. |
 | **Metered CU Burn** | ~8.71 CU/hr | Record for sitting budget | If > 12 CU/hr, re-evaluate sitting economics |
