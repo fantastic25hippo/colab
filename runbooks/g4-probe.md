@@ -1,0 +1,210 @@
+# Runbook: G4 Hardware and Entitlement Probe
+
+Probe procedure for testing NVIDIA G4 entitlement, hardware specifications, host memory pinning (`mlock`), and hourly Compute Unit (CU) burn on Google Colab under the [Google AI Pro](https://support.google.com/googleone/answer/16287313) account (`zuluzain5@gmail.com`).
+
+Primary references:
+- Google Colab FAQ: https://research.google.com/colaboratory/faq.html
+- NVIDIA RTX PRO 6000 Server Edition: https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/
+- SGLang Qwen 3.8 Flash-Next Cookbook: https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-Flash-Next
+- Lenovo ThinkSystem G4 Server Documentation: https://lenovopress.lenovo.com/lp2263-thinksystem-nvidia-rtx-pro-6000-blackwell-server-edition-pcie-gen5-gpu
+- Benchmark & Meter Reference (Qiita): https://qiita.com/jin0g/items/8fbfb209ac4e9343c13f
+
+---
+
+## 1. Objectives and Scope
+
+1. **Entitlement Probe**: Determine whether this Google AI Pro account (`zuluzain5@gmail.com`, 200 CU/month) can provision a `--gpu G4` VM.
+2. **Hardware Verification**: Verify that the provisioned GPU is the Blackwell RTX PRO 6000 Server Edition with ~96 GB VRAM and ~177 GB host system RAM.
+3. **Memory Pinning Probe**: Determine whether the unprivileged Colab user environment permits host memory pinning (`mlock` >= 64 GB) without Docker container privileges.
+4. **Meter Verification**: Confirm the real-time hourly CU burn rate via `colab usage`.
+5. **Fail-Fast Teardown**: Stop the instance immediately upon test completion to avoid unnecessary CU expenditure.
+
+> [!IMPORTANT]
+> **UNVERIFIED Status**:
+> - **G4 Entitlement on AI Pro**: An independent Japanese report on `note.com` indicated G4 was grayed out on one AI Pro account. Whether `zuluzain5@gmail.com` can provision G4 remains **UNVERIFIED** until this probe executes.
+> - **Colab Docker Availability**: Standard Colab VMs often do not provide Docker or do not have the Docker daemon running. Whether Docker is available and operational on the provisioned Colab VM remains **UNVERIFIED**.
+> - **Colab Native mlock Without Docker**: SGLang `--ple-offload-embedding` requires pinning ~47.7 GiB of host RAM. The cookbook verified path is Docker `--ulimit memlock=-1`, but whether native Colab unprivileged runtimes permit pinning >= 64 GB remains **UNVERIFIED**.
+> - **Server Edition Decode Speed**: Passively cooled Server Edition runs memory at 1,597 GB/s (~10.9% below Workstation Edition's 1,792 GB/s), giving an expected decode speed of ~130–135 tok/s (vs ~148 tok/s in cookbook). This remains **UNVERIFIED** on live Colab silicon.
+
+---
+
+## 2. Pre-Flight Check
+
+On your local workstation terminal:
+
+```bash
+# Verify CLI version (must be 0.7.4; 0.6.0 drops sessions, 0.7.2 broken exec, 0.7.3 yanked)
+colab --auth=oauth2 whoami
+# Expected: Email: zuluzain5@gmail.com
+
+# Verify zero lingering active sessions
+colab --auth=oauth2 sessions
+
+# Check existing CU balance before provisioning
+colab --auth=oauth2 usage
+```
+
+---
+
+## 3. Provisioning Request
+
+Request a G4 instance without `--high-mem`:
+
+```bash
+colab --auth=oauth2 new -s g4-probe --gpu G4
+```
+
+### Immediate Branching Logic:
+- **Case A: Request Rejected or Gated**:
+  If the CLI returns an entitlement error, quota denial, or unsupported accelerator message:
+  1. Record the exact error string.
+  2. Conclude G4 is unentitled for this AI Pro tier.
+  3. Abort G4 deployment immediately and pivot to the verified A100 40GB fallback ([`fallback-27b.md`](fallback-27b.md)).
+- **Case B: Session Assigned**:
+  Proceed immediately to Step 4.
+
+---
+
+## 4. Hardware Inspection & Stop Gates
+
+Run an immediate non-interactive hardware telemetry audit:
+
+```bash
+colab --auth=oauth2 exec -s g4-probe --timeout 120 -- bash -c '
+echo "=== GPU TELEMETRY ==="
+nvidia-smi --query-gpu=name,memory.total,memory.free,driver_version,pstate,compute_cap --format=csv
+
+echo "=== HOST MEMORY ==="
+free -g
+free -m
+
+echo "=== CPU ARCHITECTURE ==="
+lscpu | grep -E "Model name|CPU\(s\):|Thread\(s\) per core"
+
+echo "=== FILESYSTEM STORAGE ==="
+df -h / /content
+'
+```
+
+### Strict SKU Stop Criteria:
+Halt and unassign the VM immediately (`colab --auth=oauth2 stop -s g4-probe`) if ANY of the following conditions occur:
+1. **GPU is not Blackwell G4**: Name does not identify as `NVIDIA RTX PRO 6000 Server Edition` (or Blackwell `sm_120`/`sm_120a`).
+2. **VRAM is not ~96 GB**: `nvidia-smi` reports total VRAM significantly below ~95.6 GiB (97,896 MiB). If assigned an A100 (40 GB or 80 GB) or L4 (24 GB), STOP.
+3. **Host RAM is not ~177 GB**: Total system RAM reported by `free -g` is in the ~53–84 GB range (standard A100/L4 shapes). Qiita measured G4 host RAM at 176.9 GB with 48 vCPUs. If host RAM < 150 GB, STOP.
+4. **Storage Shortage**: Available disk on `/content` or `/` is < 150 GB (insufficient to stage the 132.7 GB Flash-Next checkpoint).
+
+---
+
+## 5. Host Memory Pinning (`mlock`) and Docker Probe
+
+SGLang's `--ple-offload-embedding` offloads the 51.2B FP8 piece-level embedding table (~47.7 GiB) into pinned host RAM with asynchronous PCIe prefetching. Pinning requires `mlock` permissions. The official cookbook verified path uses Docker with `--ulimit memlock=-1`. However, Colab VMs often do not have Docker installed or running.
+
+Execute the following in-guest script to probe both Docker availability and native `mlock` allocation limits:
+
+```bash
+colab --auth=oauth2 exec -s g4-probe --timeout 180 -- bash -c '
+echo "=== DOCKER AVAILABILITY PROBE ==="
+if command -v docker &>/dev/null; then
+    docker --version
+    if docker info &>/dev/null; then
+        echo "DOCKER STATUS: Docker daemon is active and accessible."
+    else
+        echo "DOCKER STATUS: Docker installed, but daemon is NOT running / inaccessible."
+    fi
+else
+    echo "DOCKER STATUS: Docker is NOT installed on this Colab VM."
+fi
+
+echo -e "\n=== RLIMIT_MEMLOCK & NATIVE MLOCK PROBE ==="
+python3 -c '\''
+import os, sys, resource, ctypes
+
+soft, hard = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+print(f"Soft limit: {soft} bytes ({soft / (1024**3):.2f} GiB)")
+print(f"Hard limit: {hard} bytes ({hard / (1024**3):.2f} GiB)")
+
+# Attempt to lock a test buffer (50 GiB to cover the 47.7 GiB PLE table)
+TARGET_GIB = 50
+TARGET_BYTES = TARGET_GIB * 1024 * 1024 * 1024
+
+print(f"\nAttempting allocation of {TARGET_GIB} GiB host memory...")
+try:
+    buf = bytearray(TARGET_BYTES)
+    print("Allocation succeeded. Attempting mlock via libc...")
+    libc = ctypes.CDLL("libc.so.6")
+    addr = (ctypes.c_char * len(buf)).from_buffer(buf)
+    res = libc.mlock(ctypes.byref(addr), ctypes.c_size_t(len(buf)))
+    if res == 0:
+        print(f"SUCCESS: Successfully pinned {TARGET_GIB} GiB host RAM with mlock!")
+        libc.munlock(ctypes.byref(addr), ctypes.c_size_t(len(buf)))
+        sys.exit(0)
+    else:
+        err = ctypes.get_errno()
+        print(f"FAILED: libc.mlock returned {res} (errno {err}: {os.strerror(err)})")
+        print("RESULT: Native mlock failed. Docker container with --ulimit memlock=-1 is required if Docker is available.")
+        sys.exit(1)
+except MemoryError:
+    print("FAILED: Host MemoryError during allocation.")
+    sys.exit(2)
+except Exception as e:
+    print(f"FAILED: Exception encountered: {e}")
+    sys.exit(3)
+'\''
+'
+```
+
+### Result Analysis:
+- If `mlock` succeeds: Native SGLang execution outside Docker is viable.
+- If `mlock` fails but Docker daemon is active: SGLang can be launched inside Docker using `docker run --gpus all --ulimit memlock=-1`.
+- If both `mlock` and Docker fail: SGLang cannot pin the 47.7 GiB PLE table on this G4 VM; pivot immediately to the verified A100 fallback ([`fallback-27b.md`](fallback-27b.md)).
+
+---
+
+## 6. Real Metered Rate Verification
+
+Check the metered hourly burn rate reported by the Colab backend:
+
+```bash
+colab --auth=oauth2 usage
+```
+
+Expected metered burn for G4 Server Edition: **~8.71 CU/hr** (measured by Qiita at 8.71 CU/hr; early promotional/off-peak rates of 6.40–6.74 CU/hr are obsolete).
+
+Cross-check via Web UI if browser profile `zuluzain5@gmail.com` is active:
+1. Navigate to https://colab.research.google.com
+2. Open active session `g4-probe`.
+3. Check the Resources panel (RAM / Disk / Compute Units remaining).
+
+---
+
+## 7. Immediate Teardown
+
+Do not allow the probe instance to idle. At 8.71 CU/hr, idling burns ~0.145 CU every minute.
+
+```bash
+# Terminate session from workstation
+colab --auth=oauth2 stop -s g4-probe
+
+# Verify clean state
+colab --auth=oauth2 sessions
+```
+
+Alternatively, from within the guest:
+```python
+from google.colab import runtime
+runtime.unassign()
+```
+
+---
+
+## 8. Probe Decision Matrix
+
+| Probe Item | Expected Value | Pass Next Step | Fail Remediation |
+| :--- | :--- | :--- | :--- |
+| **G4 Provisioning** | Session created | Proceed to hardware check | Fall back to A100 40GB ([`fallback-27b.md`](fallback-27b.md)) |
+| **GPU Name** | RTX PRO 6000 Server Edition | Proceed to VRAM check | Terminate session immediately (`colab stop`) |
+| **VRAM Capacity** | ~95.6 GiB (`nvidia-smi`) | Proceed to Host RAM check | Stop immediately; SKU mismatch |
+| **Host System RAM** | ~177 GB (`free -g`) | Proceed to mlock & docker probe | Stop immediately; insufficient RAM for PLE |
+| **Docker Availability** | Daemon active & GPU accessible | Docker `--ulimit memlock=-1` path verified | Native `mlock` required |
+| **Native mlock** | 50 GiB pinned | Native SGLang permitted | Docker `--ulimit memlock=-1` required (or fall back to A100) |
+| **Metered CU Burn** | ~8.71 CU/hr | Record for sitting budget | If > 12 CU/hr, re-evaluate sitting economics |

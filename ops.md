@@ -1,6 +1,10 @@
 # Ops
 
-Account, Colab CLI, Drive, tunnel, heartbeat, and shutdown. Architecture: [`architecture.md`](architecture.md). Launch: [`inference.md`](inference.md). First sitting: [`first-boot.md`](first-boot.md).
+Account, Colab CLI, Drive, tunnel, heartbeat, client integration, and shutdown.
+Runbooks:
+- G4 Hardware & Entitlement Probe: [`runbooks/g4-probe.md`](runbooks/g4-probe.md)
+- Qwen 3.8 Flash-Next via SGLang: [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md)
+- Fallback 27B via llama.cpp: [`runbooks/fallback-27b.md`](runbooks/fallback-27b.md)
 
 ---
 
@@ -10,13 +14,13 @@ Account, Colab CLI, Drive, tunnel, heartbeat, and shutdown. Architecture: [`arch
 | :--- | :--- |
 | CLI identity | `zuluzain5@gmail.com` |
 | Token | `~/.config/colab-cli/token.json` |
-| Plan | Google AI Pro → **200 CU / month** |
+| Plan | Google AI Pro → **200 CU / month** pool |
 | CLI | `google-colab-cli==0.7.4` at `/home/sahil/.local/bin/colab` |
 | Auth | `--auth=oauth2`. Grant all OAuth scopes. |
 
-Do not print or commit `token.json`.
+Do not print or commit `token.json`. Keep existing CLI identity intact.
 
-`"You are not subscribed"` in the Colab UI is expected: AI Pro does not badge as Colab Pro. Paid-plan GPUs need a **positive** CU balance.
+`"You are not subscribed"` in the Colab UI is expected: Google AI Pro does not badge as Colab Pro. Paid-plan GPUs draw directly from the positive 200 CU monthly balance.
 
 ---
 
@@ -32,13 +36,45 @@ colab --auth=oauth2 whoami
 # Email: zuluzain5@gmail.com
 ```
 
-0.6.0 drops the local session after 1 h (`RuntimeProxyInfo.token` never refreshes) while the VM keeps billing. 0.7.4 refreshes the token 5 minutes before expiry and adds `colab usage` (`GET /tun/m/ccu-info`). Web Resources panel remains a check.
+0.6.0 drops the local session after 1 h (`RuntimeProxyInfo.token` never refreshes) while the VM keeps billing. 0.7.4 refreshes the token 5 minutes before expiry and adds `colab usage` (`GET /tun/m/ccu-info`). Web Resources panel remains an independent check.
 
 There is **no** `colab port-forward`. Hybrid loop: CLI for `new` / `exec` / `stop`; web for CCU; in-guest trycloudflare for OpenAI `/v1`.
 
 ---
 
+## Client integration (Pi harness & council-go)
+
+The Pi coding-agent harness is the client of this `/v1` endpoint; later council-go will use the same OpenAI-compatible `/v1` over the existing trycloudflare tunnel with an API key.
+
+Clients connect to the ephemeral public URL emitted at tunnel startup:
+
+```python
+from openai import OpenAI
+import os
+
+client = OpenAI(
+    base_url="https://<slug>.trycloudflare.com/v1",
+    api_key=os.environ["LLAMA_API_KEY"],
+)
+```
+
+Both clients interact strictly via standard OpenAI `/v1/chat/completions` and `/v1/models` requests authenticated via the pre-shared Bearer token. Neither client requires internal architectural changes to switch between the Flash-Next and 27B backends.
+
+---
+
 ## Sitting loop
+
+### Primary (G4 Flash-Next)
+Follow [`runbooks/g4-probe.md`](runbooks/g4-probe.md) first to verify entitlement and host `mlock`. If entitled, launch via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md):
+
+```bash
+colab --auth=oauth2 new -s qwen-g4 --gpu G4
+colab --auth=oauth2 drivemount -s qwen-g4 /content/drive
+# Immediate guard: stop unless RTX PRO 6000 (~95.6 GiB VRAM), host RAM ~177 GB, metered ~8.71 CU/hr
+```
+
+### Fallback (A100 40GB 27B)
+Follow [`runbooks/fallback-27b.md`](runbooks/fallback-27b.md):
 
 ```bash
 colab --auth=oauth2 whoami
@@ -46,11 +82,10 @@ colab --auth=oauth2 sessions
 colab --auth=oauth2 usage          # also check the web Resources panel
 
 colab --auth=oauth2 new -s qwen-worker --gpu A100
-# never --high-mem
+# never pass --high-mem
 
-# SKU guard immediately:
-colab --auth=oauth2 usage
-# stop if burn > ~8 CU/hr, status HIGH_RAM, nvidia-smi ~80 GB, or host RAM > 110 GB
+# Immediate SKU guard:
+# stop if burn > ~6.77 CU/hr, status HIGH_RAM, nvidia-smi ~80 GB, or host RAM > 110 GB
 
 colab --auth=oauth2 drivemount -s qwen-worker /content/drive
 
@@ -66,75 +101,71 @@ colab --auth=oauth2 sessions
 
 `colab exec` default `--timeout` is 30 s. Expiry does **not** kill guest processes; it only detaches the laptop. Always pass `--timeout 86400`.
 
-Google AI Pro has **no background execution**. Fire-and-exit exec is reaped in ~10–15 min even if llama-server is serving over trycloudflare. `start_server.py` must stay in a 20–25 s stdout heartbeat loop polling `/health` and `/slots`.
+Google AI Pro has **no background execution**. Fire-and-exit exec is reaped in ~10–15 min even if the server is serving over trycloudflare. `start_server.py` must stay in a 20–25 s stdout heartbeat loop polling `/health` and `/slots`.
 
 ---
 
-## Drive mount
+## Drive mount & caching to cut boot
 
 Mount is interactive **every new VM** (`authtype=dfs_ephemeral`, `record=false`). Kernel timeout is **120 s**.
 
 Browser `authuser=0` must be `zuluzain5@gmail.com`. Use a dedicated browser profile with only that Google account. Complete the grant within 60 s.
 
-If `colab drivemount` hangs at `Resuming mount...`, open the session URL in that same profile (`colab url -s qwen-worker --open`).
+If `colab drivemount` hangs at `Resuming mount...`, open the session URL in that same profile (`colab url -s <session> --open`).
 
 Do not blindly re-run `drivemount`. Inside the guest, check `os.path.ismount('/content/drive')` first.
 
-Canonical weights path: `/content/drive/MyDrive/colab_llm/`.
+Canonical storage path: `/content/drive/MyDrive/colab_llm/`.
+
+### Drive caching strategy
+Cold boots on Google Colab burn expensive metered CUs on every session initialization. Caching artifacts directly on Google Drive cuts warm-boot latency to under 45 seconds:
+- **A100 Fallback**: Precompiled standalone binaries (`llama-server`, `llama-quantize`, `llama-bench` compiled with `-DBUILD_SHARED_LIBS=OFF`), the 16.8 GB `Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf` checkpoint, the 1.14 GB quantized sidecar `dflash-Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf`, and `cloudflared` are cached under `/content/drive/MyDrive/colab_llm/bin/` and root. On warm boot, `shutil.copy2` copies binaries to `/usr/local/bin/`, and `llama-server` reads weights directly from Drive via `--load-mode none`.
+- **G4 Flash-Next**: The 132.7 GB safetensors checkpoint (`nvidia/Qwen3.8-Flash-Next-NVFP4`) is cached under `/content/drive/MyDrive/colab_llm/checkpoints/nvidia/Qwen3.8-Flash-Next-NVFP4/` to eliminate a 10–20 minute download penalty (~1.5–3.0 CU) on every session.
 
 ---
 
-## Tunnel
+## Tunnel & API key
 
 ```bash
-cloudflared tunnel --url http://localhost:8080
+cloudflared tunnel --url http://localhost:8080 > /tmp/cloudflared.log 2>&1 &
 ```
 
-Parse from stderr:
+Parse from file log `/tmp/cloudflared.log` (never attach directly to `subprocess.PIPE`):
 
 ```
 https://(?!api\.)[a-z0-9]+(?:-[a-z0-9]+)+\.trycloudflare\.com
 ```
 
-Wait 5–8 s (or resolve against 1.1.1.1) before printing the URL. trycloudflare NXDOMAIN caches for 30 min if you query too early.
+Persist the parsed URL to `/tmp/tunnel_url.txt`. Wait 5–8 s (or resolve against 1.1.1.1) before printing or using the URL; trycloudflare NXDOMAIN caches for 30 min if queried too early.
 
-Local client:
-
-```python
-from openai import OpenAI
-client = OpenAI(
-    base_url="https://<slug>.trycloudflare.com/v1",
-    api_key=os.environ["LLAMA_API_KEY"],
-)
-```
-
-`--api-key` on llama-server is the documented way to lock the public tunnel. Prefer `LLAMA_API_KEY` via `colab exec --env`.
+`--api-key` on the server (`llama-server` or SGLang) is mandatory to lock the public tunnel. Pass the secret via `colab exec --env LLAMA_API_KEY="$LLAMA_API_KEY"` so it does not appear in process tables (`ps aux`). `/health` remains accessible for monitoring without auth.
 
 ---
 
 ## Heartbeat and reconnect
 
-`start_server.py` (when written) must:
+To survive ephemeral client disconnections and prevent Google AI Pro's ~10–15 minute reaper from killing the VM, `start_server.py` implements strict subprocess isolation and heartbeat logging:
 
-1. Start llama-server and cloudflared as children.
-2. Print `TUNNEL_READY_URL=https://….trycloudflare.com` with `flush=True`.
-3. Every 20–25 s, poll `/health` and `/slots`, confirm both children are alive, print one heartbeat line with `flush=True`.
+1. **Process Isolation (`start_new_session=True`)**: Both the model engine (`llama-server` or SGLang) and `cloudflared` must be spawned with `start_new_session=True` so they become independent process group leaders.
+2. **File-Backed Logs (No `subprocess.PIPE`)**: Redirect child `stdout` and `stderr` directly to disk files (`/tmp/llama-server.log` or `/tmp/sglang.log`, and `/tmp/cloudflared.log`). Never attach `stdout`/`stderr` to `subprocess.PIPE`—an undrained 64 KB Linux pipe buffer fills up and triggers `SIGPIPE` or deadlocks when the laptop client detaches.
+3. **Tunnel URL Persistence**: Poll `/tmp/cloudflared.log` to extract the `trycloudflare.com` URL, wait 5–8 s for DNS propagation, write it to `/tmp/tunnel_url.txt`, and print `TUNNEL_READY_URL=https://...` with `flush=True`.
+4. **Heartbeat Loop**: Every 20–25 s, poll `/health` and `/slots` (or `/v1/models`), confirm child processes are alive, and print a heartbeat line to stdout with `flush=True`.
 
-Attached exec + heartbeat prevents idle-kernel reaping. Exact 1 h WebSocket cutoff is unpublished; treat drops as expected. Reconnect **without reloading weights**:
+If the attached `colab exec` WebSocket drops after 1–3.5 hours, reconnect **without reloading weights**:
 
 ```bash
-colab exec -s qwen-worker --timeout 86400 -f attach_heartbeat.py
+colab exec -s <session> --timeout 86400 -f attach_heartbeat.py
 ```
 
-`attach_heartbeat.py` checks `/health` and `pgrep cloudflared`. If both are up, skip compile and load, and enter the heartbeat + watchdog loop. Reconnect within << 10 min. Never `colab restart-kernel` or `colab stop` during a reconnect.
+`attach_heartbeat.py` reads `/tmp/tunnel_url.txt`, verifies `/health` and `cloudflared`, re-emits `TUNNEL_READY_URL=...`, and resumes the heartbeat/watchdog loop. Reconnect within << 10 minutes. Never execute `colab restart-kernel` or `colab stop` during reconnect.
 
 ---
 
-## Idle watchdog
+## Idle watchdog & stop/unassign
 
-Reset the timer on change of `(id_task, n_decoded, n_prompt_tokens_processed, n_prompt_tokens)`. `n_decoded` goes to 0 when a turn ends, so a timer that only watches `n_decoded > 0` will kill a healthy pause.
+Reset the idle timer on change of `(id_task, n_decoded, n_prompt_tokens_processed, n_prompt_tokens)`. Because `n_decoded` drops to 0 when a generation turn completes, an idle timer that only watches `n_decoded > 0` will prematurely kill a normal pause between agent prompts.
 
-Default idle is **1800 s** (30 min ≈ 2.69 CU on A100 40GB). 120 s kills normal coding pauses.
+Default idle timeout is **1800 s** (30 min ≈ 2.69 CU on A100 40GB; ~4.36 CU on G4).
 
 When the timer fires:
 
@@ -143,45 +174,55 @@ from google.colab import runtime
 runtime.unassign()
 ```
 
-That deletes the VM assignment and stops CU burn. Laptop wrapper still runs `colab stop -s qwen-worker` so `sessions.json` is clean.
+`runtime.unassign()` deletes the VM assignment from within the guest and halts billing immediately. The local wrapper on the laptop then runs `colab stop -s <session>` to clean up local `sessions.json`.
 
-Also keep a 4-hour hard cutoff.
+A 4-hour hard cutoff is enforced so unattended sessions never run overnight.
 
 ---
 
 ## SKU stop rules
 
-Immediately `colab stop -s qwen-worker` (or `runtime.unassign()` from the guest) if any of:
+Immediately execute `colab stop -s <session>` (or `runtime.unassign()` from the guest) if any hardware guard fails:
 
-- `nvidia-smi` name / memory shows ~80 GB (`A100-SXM4-80GB`)
-- `colab status` shows `HIGH_RAM`
-- host RAM > 110 GB (A100 High-RAM is ~167 GB; Standard A100 is ~83.5 GB)
-- `colab usage` burn is High-RAM-class (~6.77+ CU/hr on an A100 request)
+### A100 SKU Guard (Fallback Track)
+Stop immediately if:
+- `nvidia-smi` reports ~80 GB (`A100-SXM4-80GB`).
+- `colab status` shows `HIGH_RAM`.
+- Host system RAM > 110 GB (A100 High-RAM is ~167 GB; Standard A100 is ~83.5 GB).
+- `colab usage` metered rate is High-RAM class (~6.77+ CU/hr on an A100 request). Extra VRAM is completely unneeded for 100K `q8_0` KV, and idle minutes cost 26% more.
 
-Silent Standard-shape 80 GB at ~6.77 CU/hr is still STOP. Extra VRAM is unused at 100K q8_0, and idle minutes cost more.
-
-G4 is optional. `colab new --gpu G4` is often rejected on AI Pro. If it assigns, it is the Server Edition at 1,597 GB/s.
+### G4 SKU Guard (Primary Track)
+Stop immediately if:
+- GPU is not confirmed as `NVIDIA RTX PRO 6000 Server Edition` (`sm_120`/`sm_120a`).
+- VRAM reported by `nvidia-smi` is not ~95.6 GiB (e.g., fallback to 24 GB L4 or 40 GB A100).
+- Host system RAM is not in the ~177 GB class (Qiita benchmark measured 176.9 GB, 48 vCPUs; stop if host RAM < 150 GB).
+- Metered burn rate via `colab usage` exceeds expected ~8.71 CU/hr standard baseline.
 
 ---
 
-## CU meter
+## CU meter & quota management
 
-`colab usage` exists in 0.7.4. Web Resources panel is still a check:
+`colab usage` is available directly in CLI 0.7.4. Cross-check against the web Resources panel before and after every sitting:
 
-1. Open [colab.research.google.com](https://colab.research.google.com/) as `zuluzain5@gmail.com`.
-2. Connect or *Runtime → Change runtime type*.
-3. RAM / Disk bar → remaining units and hourly burn.
+1. Open https://colab.research.google.com as `zuluzain5@gmail.com`.
+2. Connect or inspect *Runtime → Change runtime type*.
+3. Inspect the RAM / Disk bar for remaining units and hourly burn.
 
-Do not start a VM just to inspect quota. Recheck before any GPU sitting.
+Do not provision a VM merely to inspect quota. Check quota beforehand.
 
-At 0 CU the backend kills the VM and the trycloudflare URL dies.
+At 0 CU, the backend terminates the VM immediately and the trycloudflare URL dies.
 
 ---
 
 ## Checklist before a sitting
 
-1. `colab --auth=oauth2 whoami` → `zuluzain5@gmail.com`
-2. `colab sessions` → none, unless you intend one
-3. `colab usage` and Resources panel → positive CU, matching avatar
-4. Dedicated browser profile is `authuser=0` for Drive
-5. After work: `colab stop -s qwen-worker` and `colab sessions` empty
+1. Workstation identity check: `colab --auth=oauth2 whoami` → `zuluzain5@gmail.com`.
+2. Clean session state: `colab --auth=oauth2 sessions` → empty.
+3. Quota check: `colab --auth=oauth2 usage` → positive CU balance from 200 CU pool.
+4. Browser profile: Dedicated profile where `authuser=0` is `zuluzain5@gmail.com` for interactive Drive grant.
+5. Provision target GPU:
+   - Run G4 probe ([`runbooks/g4-probe.md`](runbooks/g4-probe.md)) to test G4 entitlement and host `mlock`.
+   - If G4 passes, serve via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md).
+   - If G4 is unentitled, rejected, or fails host `mlock`, serve via [`runbooks/fallback-27b.md`](runbooks/fallback-27b.md).
+6. Verify first-boot log greps, VRAM ceilings, and smoke curl gates.
+7. After work: Ensure session is unassigned and `colab --auth=oauth2 sessions` is empty.
