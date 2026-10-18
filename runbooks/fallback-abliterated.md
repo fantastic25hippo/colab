@@ -34,8 +34,8 @@ To qualify a candidate checkpoint for operational fallback use, it must pass thr
   - *Pass Criteria*: Model weights load without panic, and offload to GPU memory succeeds without CPU mmap thrashing.
 
 ### Gate 2: GSM8K Reasoning Benchmark
-Run an evaluation subset of GSM8K (minimum 50 problems) against the local `/v1` endpoint:
-- *Pass Criteria*: Accuracy remains within 2.0% of stock Qwen 3.8 Flash-Next performance without reasoning degradation or perplexity explosion.
+Run the full GSM8K set (1,319 problems) against the local `/v1` endpoint to match the cookbook's 97.0–97.7% stock baseline. If a full run is impractical, use at least 500 problems with a 2-point tolerance (50 problems cannot resolve a 2.0% gap: one question = 2%).
+- *Pass Criteria*: Accuracy remains within 2.0 percentage points of stock Qwen 3.8 Flash-Next (cookbook 97.0–97.7%) without reasoning degradation or perplexity explosion.
 
 ### Gate 3: Refusal Check
 Submit standard sensitive security and systems engineering prompts (e.g., buffer overflow reproduction, exploit payload analysis):

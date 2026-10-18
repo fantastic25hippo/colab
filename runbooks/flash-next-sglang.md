@@ -65,7 +65,7 @@ The official SGLang cookbook specifies distinct launch requirements depending on
 
 | Setting / Flag | NVIDIA (`nvidia/Qwen3.8-Flash-Next-NVFP4`) | RadixArk (`RadixArk/Qwen3.8-Flash-Next-NVFP4`) |
 | :--- | :--- | :--- |
-| **Quantization Format** | `modelopt_mixed` (mixed precision: linear attn/embed in FP8/BF16, MoE in NVFP4) | `modelopt_fp4` (uniform FP4 MoE) |
+| **Quantization Format** | `modelopt_mixed` (mixed precision: linear attn/embed in FP8/BF16, MoE in NVFP4) | ModelOpt NVFP4 (auto-detected) |
 | **`--quantization` flag** | **DO NOT PASS** (Quantization is auto-detected from checkpoint config; passing `--quantization` causes loader failure) | **DO NOT PASS** (Cookbook passes no `--quantization` flag for either export) |
 | **Docker Container** | `lmsysorg/sglang:dev-qwen38-next-local` (requires PR #38121) | `lmsysorg/sglang:dev-qwen38-next-local` (or standard release with FP4 support) |
 | **Tensor Parallelism** | `--tp 1` (verified single RTX PRO 6000 execution) | `--tp 1` |

@@ -32,7 +32,7 @@ Account authentication, session persistence, heartbeat, and shutdown procedures 
 | Document | Role & Description | Status |
 | :--- | :--- | :--- |
 | [`claims-ledger.md`](claims-ledger.md) | **Source of truth.** Factual and numerical audit of all hardware, checkpoint, runtime, and economic claims across the repo. | Canonical |
-| [`decision.md`](decision.md) | Current architecture decision, candidate evaluation matrix, G4 vs A100 comparison, and grounded economics. | Canonical |
+| [`decision.md`](decision.md) | Current architecture decision, candidate evaluation matrix, G4 platform analysis, and grounded economics. | Canonical |
 | [`ops.md`](ops.md) | Colab CLI 0.7.4 workflow, Drive mount, trycloudflare tunnel, heartbeat loops, and watchdog shutdown. | Shipping |
 | [`runbooks/g4-probe.md`](runbooks/g4-probe.md) | Operational probe for G4 entitlement, hardware specs, host mlock, and CU burn. | Shipping |
 | [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md) | Operational step-by-step launch procedure for Flash-Next NVFP4 via SGLang on G4. | Shipping |

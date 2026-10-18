@@ -61,12 +61,15 @@ colab --auth=oauth2 new -s g4-probe --gpu G4
   1. Record the exact error string.
   2. Conclude G4 is unentitled for this AI Pro tier.
   3. G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report.
+  4. Run `colab --auth=oauth2 sessions` to confirm nothing is left allocated.
 - **Case B: Session Assigned**:
   Proceed immediately to Step 4.
 
 ---
 
 ## 4. Hardware Inspection & Stop Gates
+
+If this `colab exec` fails or times out, go straight to §7 teardown. Do not continue to §5.
 
 Run an immediate non-interactive hardware telemetry audit:
 
@@ -99,6 +102,8 @@ Halt and unassign the VM immediately (`colab --auth=oauth2 stop -s g4-probe`) if
 ## 5. Host Memory Pinning (`mlock`) and Docker Probe
 
 SGLang's `--ple-offload-embedding` offloads the 51.2B FP8 piece-level embedding table (~47.7 GiB) into pinned host RAM with asynchronous PCIe prefetching. Pinning requires `mlock` permissions. The official cookbook verified path uses Docker with `--ulimit memlock=-1`. However, Colab VMs often do not have Docker installed or running.
+
+If this `colab exec` fails or times out, go straight to §7 teardown.
 
 Execute the following in-guest script to probe both Docker availability and native `mlock` allocation limits:
 
@@ -134,16 +139,18 @@ print(f"\nAttempting allocation of {TARGET_GIB} GiB host memory...")
 try:
     buf = bytearray(TARGET_BYTES)
     print("Allocation succeeded. Attempting mlock via libc...")
-    libc = ctypes.CDLL("libc.so.6")
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
     addr = (ctypes.c_char * len(buf)).from_buffer(buf)
     res = libc.mlock(ctypes.byref(addr), ctypes.c_size_t(len(buf)))
     if res == 0:
         print(f"SUCCESS: Successfully pinned {TARGET_GIB} GiB host RAM with mlock!")
         libc.munlock(ctypes.byref(addr), ctypes.c_size_t(len(buf)))
+        del buf
     else:
         err = ctypes.get_errno()
         print(f"FAILED: libc.mlock returned {res} (errno {err}: {os.strerror(err)})")
         print("RESULT: Native mlock failed. Docker container with --ulimit memlock=-1 is required if Docker is available.")
+        del buf
 except MemoryError:
     print("FAILED: Host MemoryError during allocation.")
 except Exception as e:
@@ -152,7 +159,7 @@ except Exception as e:
 
 echo -e "\n=== CUDA HOST MEMORY PINNING (torch.pin_memory) PROBE ==="
 # libc mlock alone does not prove CUDA page-locked memory registration
-python3 -c "import torch,time;t=time.time();x=torch.empty(48*2**30,dtype=torch.uint8).pin_memory();print('pinned OK',time.time()-t)"
+python3 -c "import torch,time;t=time.time();x=torch.empty(48*2**30,dtype=torch.uint8,pin_memory=True);print(\"pinned OK\",round(time.time()-t,1),\"s\");del x"
 '
 ```
 
