@@ -5,6 +5,7 @@ Runbooks:
 - G4 Hardware & Entitlement Probe: [`runbooks/g4-probe.md`](runbooks/g4-probe.md)
 - Qwen 3.8 Flash-Next via SGLang: [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md)
 - Fallback: abliterated Flash-Next on G4: [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md)
+- Hardware Specifications Reference: [`hardware.md`](hardware.md)
 
 ---
 
@@ -70,7 +71,7 @@ Follow [`runbooks/g4-probe.md`](runbooks/g4-probe.md) first to verify entitlemen
 ```bash
 colab --auth=oauth2 new -s qwen-g4 --gpu G4
 colab --auth=oauth2 drivemount -s qwen-g4 /content/drive
-# Immediate guard: stop unless RTX PRO 6000 (~95.6 GiB VRAM), host RAM ~177 GB, metered ~8.71 CU/hr
+# Immediate guard: stop unless RTX PRO 6000 (~95.6 GiB VRAM), host RAM ~177 GB, metered ~8.71 CU/hr (see [`hardware.md`](hardware.md))
 ```
 
 ### Fallback (Abliterated Flash-Next on G4)

@@ -4,7 +4,7 @@
 
 **Target:** Linux Mint workstation + Colab GPU, Bend projects under `/home/sahil/Desktop/bend/projects/<project-name>/`.
 
-GPU stack, launch, and shutdown defer to [`architecture.md`](architecture.md), [`inference.md`](inference.md), and [`ops.md`](../../../ops.md).
+GPU stack, launch, and shutdown defer to [`architecture.md`](architecture.md), [`inference.md`](inference.md), and [`ops.md`](../../ops.md).
 
 **Out of scope:** "Bend inside of bend". Do not invent it here.
 
@@ -127,7 +127,7 @@ Two-tier stop:
 
 Reconnect without reload: `colab exec -s qwen-worker --timeout 86400 -f attach_heartbeat.py`.
 
-CU rates and meter: [`ops.md`](../../../ops.md).
+CU rates and meter: [`ops.md`](../../ops.md).
 
 ---
 
@@ -160,7 +160,7 @@ Non-zero exit → objective not met. Gemini nudges Hermes with the compiler outp
 
 ## 7. Implementation checklist (future session)
 
-1. [ ] `colab whoami` and Resources panel (positive CU) — [`ops.md`](../../../ops.md)
+1. [ ] `colab whoami` and Resources panel (positive CU) — [`ops.md`](../../ops.md)
 2. [ ] `start_server.py`: Drive mount, Playbook A from [`inference.md`](inference.md), 20 s heartbeat, 1800 s `runtime.unassign()`, print tunnel URL
 3. [ ] Gemini harness: timeout ≥ 3600 s, `try/finally colab stop`, poll `/v1/health`, ensure `projects/<name>/` exists, write `/tmp/hermes-colab.yaml`, spawn Hermes with that cwd, audit until proofs pass
 4. [ ] Confirm `LAWS.bend` untouched and `/home/sahil/Desktop/bend/` snapshot never written

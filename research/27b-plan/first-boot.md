@@ -2,7 +2,7 @@
 
 One sitting to compile, quantize, verify logs, and measure A100 40GB speed. Do not start a GPU until asked.
 
-Launch flags: [`inference.md`](inference.md). Session loop: [`ops.md`](../../../ops.md).
+Launch flags: [`inference.md`](inference.md). Session loop: [`ops.md`](../../ops.md).
 
 ---
 

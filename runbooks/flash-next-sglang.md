@@ -262,20 +262,4 @@ curl -sf "${SGLANG_URL}/v1/chat/completions" \
 
 ## 6. Active UNVERIFIED Probes to Track
 
-During execution of this runbook, the operator must treat the following five items as strictly **UNVERIFIED** until empirical measurements are logged:
-
-1. **AI Pro G4 Entitlement**:
-   - *Status*: **UNVERIFIED**.
-   - *Observation*: Whether `colab new --gpu G4` assigns a VM under the Google AI Pro subscription pool without rejection or fallback to A100/L4.
-2. **Colab Docker Availability & Native mlock**:
-   - *Status*: **UNVERIFIED**.
-   - *Observation*: Standard Colab VMs frequently do not provide a running Docker daemon or have Docker installed. Whether Docker is available in the provisioned Colab environment is UNVERIFIED. Furthermore, whether the standard Colab kernel user environment allows pinning >= 64 GB host memory for the 51.2B PLE table outside of Docker is UNVERIFIED. The official cookbook verified path requires Docker with `--ulimit memlock=-1`. Both Docker and native `mlock` must be tested via [`g4-probe.md`](g4-probe.md).
-3. **Real Cold-Boot Latency and CU Overhead**:
-   - *Status*: **UNVERIFIED**.
-   - *Observation*: The true wall-clock time and CU burn required to download 132.7 GB of safetensors and JIT-compile FlashInfer CUTLASS kernels on ephemeral Colab VM disks.
-4. **Abliterated NVFP4 Checkpoint Load & Perplexity Viability**:
-   - *Status*: **UNVERIFIED**.
-   - *Observation*: Whether community abliterated NVFP4 quants (`edp1096/Huihui-Qwen3.8-Flash-Next-abliterated-NVFP4-QAD` or `claidler/Qwen3.8-Flash-Next-Ablit-NVFP4-QAD-LMHead-NVFP4`) load cleanly without tensor shape mismatch errors in SGLang or perplexity degradation.
-5. **Real-World G4 Server Edition Decode Speed**:
-   - *Status*: **UNVERIFIED**.
-   - *Observation*: The cookbook benchmark of ~148 tok/s (with MTP) was recorded on an active-cooled RTX PRO 6000 Workstation Edition (1,792 GB/s bandwidth). Colab's passively cooled Server Edition runs at 1,597 GB/s (10.9% lower bandwidth), with an expected decode speed of ~130–135 tok/s. Real speed must be empirically verified on live G4 silicon.
+The 5 open empirical unknowns governing Flash-Next serving on Colab G4 (entitlement, Docker / native `mlock`, cold-boot latency/CU, abliterated checkpoint viability, and Server Edition decode speed) are canonically maintained in [`claims-ledger.md §5`](../claims-ledger.md#5-unverified-remaining). Operational test procedures are executed via [`runbooks/g4-probe.md`](g4-probe.md).

@@ -53,6 +53,8 @@ The system does **not** conclude "cannot run on one G4" or "do not switch". Sing
 
 ## 3. GPU Platform Analysis: Colab G4 (RTX PRO 6000 Server Edition)
 
+For complete platform hardware specifications across all Colab accelerator shapes (T4, L4, A100 40GB/80GB, G4, H100, and TPUs), see [`hardware.md`](hardware.md).
+
 | Metric / Dimension | Colab G4 Specification | Architectural & Operational Impact |
 | :--- | :---: | :--- |
 | **Silicon Architecture** | GB202 (`sm_120` / `sm_120a`), 5th-Gen Tensor Cores | Native NVFP4 block-scaled MMA tensor acceleration. |
@@ -69,48 +71,14 @@ The system does **not** conclude "cannot run on one G4" or "do not switch". Sing
 
 ## 4. First-Principles Economic Recalculation
 
-### Reconciling the "Under 40 Tasks" Fallacy
-Prior repository drafts (`research/archive/flash-next-audit/08_colab_cu_economics.md` and `10_claims_ledger_and_verdict.md`) asserted that a 200 CU monthly pool would be depleted in "under 40 agent tasks". That conclusion resulted from compounding two unrealistic, worst-case assumptions:
-1. **Cold-boot overhead charged to every single task:** Assuming an 8–18 minute cold boot (1.16–2.61 CU) on every task. In practice, an operator boots a session once per sitting (2–4 hours) and executes multiple tasks sequentially.
-2. **Unconstrained verbose reasoning tokens:** Assuming 2,500+ `<think>` tokens generated per turn. When extended thinking is delegated to the local orchestrator or capped, task generation consists of concise code diffs (500 tokens/turn).
+For the full, canonical mathematical derivation and 6-row capacity matrix across Flash-Next and historical 27B configurations, see [`claims-ledger.md §3`](claims-ledger.md#3-first-principles-economic-recalculation).
 
-### Explicit Labeled Assumptions (Ledger §3)
-- **Billing Rates:** G4 standard metered rate = `8.71 CU/hr` ($0.1452/\text{min}$, $0.002419/\text{sec}$).
-- **Monthly Allocation:** 200 Compute Units (CU) from Google AI Pro pool.
-- **Total Dedicated Uptime:** 22.96 hours on G4.
-- **Task Specification:** 25-turn autonomous coding loop.
-  - *Prefill:* 8,000 initial context tokens; subsequent turns append ~1,000 delta tokens. With SGLang RadixAttention / APC prefix caching, cached history binds in <5 ms on host CPU; delta prefill takes ~0.12 s.
-  - *Generation:* 500 tokens of code / diff per turn (12,500 output tokens total per task).
-
-### Comparative Task Capacity Matrix (200 CU Monthly Budget)
-
-| Scenario / Configuration | Decode Speed | Time / Turn | Active Task Time | Amortized Boot Overhead | CU Burn / Task | Tasks per 200 CU Pool |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Flash-Next on G4 (Headless Loop, 10-Task Sitting)** | 148 tok/s (MTP) | 3.50 s | 87.5 s (1.46 min) | 1.0 min / task (10 min boot / 10 tasks) | **0.357 CU** | **~560 tasks** |
-| **Flash-Next on G4 (Continuous Session, Warm)** | 148 tok/s (MTP) | 3.50 s | 87.5 s (1.46 min) | 0.0 min (fully warm session) | **0.212 CU** | **~943 tasks** |
-| **Flash-Next on G4 (Verbose Thinking, 2.5k tok/turn)** | 148 tok/s (MTP) | 17.0 s | 425 s (7.08 min) | 1.0 min / task (10 min boot / 10 tasks) | **1.173 CU** | **~170 tasks** |
-
-> [!IMPORTANT]
-> **Economics Summary:** Flash-Next on G4 delivers **560 to 943 tasks per 200 CU pool** across typical coding session profiles, demonstrating viable economics under practical operating conditions without requiring multi-GPU nodes.
+### Operational Recap
+- **Billing Rates & Budget:** Colab G4 standard metered rate is `8.71 CU/hr` ($0.1452/\text{min}$, $0.002419/\text{sec}$), providing **~22.96 hours** (1,377.7 minutes) from the 200 Compute Units (CU) monthly pool.
+- **Task Delivery:** Under practical multi-task sittings with prefix caching active and boot overhead amortized, Flash-Next on G4 delivers **560 to 943 tasks per 200 CU pool** (0.212–0.357 CU/task), resolving the prior "under 40 tasks" fallacy.
 
 ---
 
 ## 5. Open Empirical Probes (UNVERIFIED Status)
 
-The following five items represent empirical unknowns that cannot be proven by documentation or offline mathematics alone. They remain explicitly classified as **`unverified`** and will be resolved via live runtime testing:
-
-1. **AI Pro Account Entitlement for G4 Allocation:**
-   - *Status:* **`unverified`**
-   - *Unknown:* An engineering post on [`note.com`](https://note.com/gakushiai/n/n71ca7ca09d1b) reported that direct `--gpu G4` selection was grayed out on a Google AI Pro account (requiring Google AI Ultra or Colab Pro+). Whether Sahil's specific Google AI Pro account can provision `colab new -s qwen-worker --gpu G4` is unknown without a live probe. The note.com report is not assumed to apply to Sahil.
-2. **Colab Host Memory Pinning (`mlock`) Without Docker:**
-   - *Status:* **`unverified`**
-   - *Unknown:* SGLang's `--ple-offload-embedding` requires pinning ~47.7 GiB of host RAM. While Colab G4 provides ~177 GB of physical host RAM, standard Colab notebooks run as unprivileged users inside container sandboxes. Whether Colab's default user limits allow pinning >48 GB without root Docker container execution (`--ulimit memlock=-1`) is unverified.
-3. **Real-World Colab Cold-Boot Time and CU Burn:**
-   - *Status:* **`unverified`**
-   - *Unknown:* Downloading the 132.68 GB checkpoint over Google Cloud's internal backbone, installing SGLang wheels, and JIT-compiling FlashInfer CUTLASS kernels for `sm_120f` is estimated at 8–18 minutes (1.16–2.61 CU). True elapsed time and transient disk bandwidth throttling on ephemeral Colab instances require live empirical measurement.
-4. **Abliterated Flash-Next Checkpoint Load & Perplexity Viability:**
-   - *Status:* **`unverified`**
-   - *Unknown:* Community uncensored checkpoints exist on Hugging Face ([`edp1096/Huihui-Qwen3.8-Flash-Next-abliterated-NVFP4-QAD`](https://huggingface.co/edp1096/Huihui-Qwen3.8-Flash-Next-abliterated-NVFP4-QAD) at 106 GB, [`claidler/Qwen3.8-Flash-Next-Ablit-NVFP4-QAD-LMHead-NVFP4`](https://huggingface.co/claidler/Qwen3.8-Flash-Next-Ablit-NVFP4-QAD-LMHead-NVFP4) at 105.48 GB, and [`Alexsi98/Huihui-Qwen3.8-Flash-Next-abliterated-GGUF`](https://huggingface.co/Alexsi98/Huihui-Qwen3.8-Flash-Next-abliterated-GGUF) at 112 GB). Whether these specific quants load cleanly without tensor layout errors in SGLang (or llama.cpp for GGUF) or preserve reasoning quality without perplexity blowup on Blackwell `sm_120` is unverified.
-5. **Real-World G4 Server Edition Decode Speed:**
-   - *Status:* **`unverified`**
-   - *Unknown:* SGLang's ~148 tok/s benchmark was recorded on an active-cooled RTX PRO 6000 Workstation (1,792 GB/s). Colab's passively cooled Server Edition runs at 1,597 GB/s (10.9% lower memory bandwidth) with potential thermal constraints in high-density multi-tenant racks. Real-world generation speed is expected to be ~130–135 tok/s with MTP, but must be verified on live G4 hardware.
+The 5 open empirical unknowns (AI Pro G4 entitlement, native `mlock` without Docker, real cold-boot latency and CU burn, abliterated checkpoint viability, and real Server Edition decode speed) are tracked canonically in [`claims-ledger.md §5`](claims-ledger.md#5-unverified-remaining). Operational verification procedures are executed via [`runbooks/g4-probe.md`](runbooks/g4-probe.md).

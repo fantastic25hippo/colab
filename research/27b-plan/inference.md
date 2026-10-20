@@ -2,7 +2,7 @@
 
 Playbook A for abliterated Qwen 3.8 27B on Colab A100 40GB: `llama.cpp` + DFlash 2 + `ngram-map-k4v`.
 
-Architecture and files: [`architecture.md`](architecture.md). Session loop: [`ops.md`](../../../ops.md). First-boot gates: [`first-boot.md`](first-boot.md).
+Architecture and files: [`architecture.md`](architecture.md). Session loop: [`ops.md`](../../ops.md). First-boot gates: [`first-boot.md`](first-boot.md).
 
 Colab bills wall-clock, so tokens per second is CU savings.
 
