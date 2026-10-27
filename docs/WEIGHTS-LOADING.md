@@ -114,7 +114,7 @@ T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
 | 5. laptop HTTP to VM: ssh forward, exec log, cloudflared | mixed | (a) unmeasured/denied (ssh harness denial), (b) verified (exec log RTT 2.92 s MEASURED), (c) untried |
 | 6. Colab FAQ/ToS sentence forbidding ssh/tunnels/web servers | verified | FAQ restricted activities quoted; paid + positive CU lifts SSH restriction |
 | 7. Drive SA rclone with --transfers=12 etc. | unmeasured | `scripts/drive_sa_pull.sh` prepared; unmeasured |
-| 8. TPU weight loading & engine compatibility | verified | TPU v5e: 2.92 CU/hr, 23G /dev/shm; JAX preinstalled. GGUF/llama.cpp lacks native TPU support (requires JAX/Pallas, torch_xla, or vLLM TPU) |
+| 8. TPU weight loading & engine compatibility | verified | TPU v5e: 2.92 CU/hr, 23G /dev/shm, JAX preinstalled; GGUF/llama.cpp lacks native TPU support (requires JAX/Pallas, torch_xla, or vLLM TPU). TPU v6e (`--tpu v6e1`) timed out during provisioning on repeated attempts (capacity unavailable, 0 CU spent). |
 
 The MEASURED rows above match the report. The report's `new` ~10 s is the only
 disagreement (slower than T4 MEASURED 3.3 s).
