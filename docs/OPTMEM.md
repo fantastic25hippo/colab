@@ -22,6 +22,16 @@ grok-agy-memo note "..."      # one note per session or durable decision
 grok-agy-memo import FILE     # bulk-load dated lines (bootstrap only)
 ```
 
+`grok-agy-memo` forwards only `wake`, `note`, `import` and `fill`. It prints nothing for `recall`.
+To search the whole memory, point `MEMORY_DIR` at the store and call the memo binary:
+
+```
+MEMORY_DIR=~/.local/share/grok-agy/optmem/repos/<key>/memory OPTMEM_NO_PUSH=1 \
+  python3 ~/.local/share/grok-agy/optmem/bin/memo recall "CU rates"   # regex, case-sensitive
+```
+
+`fill` runs detached and compresses the log through the Gemini API. About 54 lines took 20 min.
+
 The seed is imported once, only while the store is empty. Editing the file later does not
 re-import it. Never nap from the agent and never edit the memory folder by hand.
 `grok-agy-memo` prints one line and does nothing inside a `grok-agy` run
