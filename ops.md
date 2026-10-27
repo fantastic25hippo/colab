@@ -2,6 +2,7 @@
 
 Model-independent Colab operations: account, Colab CLI, Drive, tunnel, heartbeat, client integration, and quota.
 Model and hardware choice live in [`research/2026_model_research/`](research/2026_model_research/README.md); the current focus is in [`README.md`](README.md).
+Per-task weight loading is [`docs/WEIGHTS-LOADING.md`](docs/WEIGHTS-LOADING.md).
 
 ---
 
@@ -12,7 +13,7 @@ Model and hardware choice live in [`research/2026_model_research/`](research/202
 | CLI identity | `zuluzain5@gmail.com` |
 | Token | `~/.config/colab-cli/token.json` |
 | Plan | Google AI Pro → **200 CU / month** pool |
-| CLI | `google-colab-cli==0.7.4` at `/home/sahil/.local/bin/colab` |
+| CLI | `google-colab-cli==0.7.5` |
 | Auth | `--auth=oauth2`. Grant all OAuth scopes. |
 
 Do not print or commit `token.json`. Keep existing CLI identity intact.
@@ -23,17 +24,17 @@ Do not print or commit `token.json`. Keep existing CLI identity intact.
 
 ## CLI upgrade (once)
 
-Installed baseline was 0.6.0. Upgrade directly to **0.7.4**. Skip 0.7.2 (broken `exec`) and yanked 0.7.3.
+Installed baseline was 0.6.0. Upgrade directly to **0.7.5**. Skip 0.7.2 (broken `exec`) and yanked 0.7.3.
 
 ```bash
-uv tool install --upgrade "google-colab-cli==0.7.4" \
-  || pip install --user --upgrade "google-colab-cli==0.7.4"
+uv tool install --upgrade "google-colab-cli==0.7.5" \
+  || pip install --user --upgrade "google-colab-cli==0.7.5"
 
 colab --auth=oauth2 whoami
 # Email: zuluzain5@gmail.com
 ```
 
-0.6.0 drops the local session after 1 h (`RuntimeProxyInfo.token` never refreshes) while the VM keeps billing. 0.7.4 refreshes the token 5 minutes before expiry and adds `colab usage` (`GET /tun/m/ccu-info`). Web Resources panel remains an independent check.
+0.6.0 drops the local session after 1 h (`RuntimeProxyInfo.token` never refreshes) while the VM keeps billing. 0.7.4+ refreshes the token 5 minutes before expiry and adds `colab usage` (`GET /tun/m/ccu-info`). Web Resources panel remains an independent check.
 
 There is **no** `colab port-forward`. Hybrid loop: CLI for `new` / `exec` / `stop`; web for CCU; in-guest trycloudflare for OpenAI `/v1`.
 
@@ -61,7 +62,7 @@ Both clients interact strictly via standard OpenAI `/v1/chat/completions` and `/
 
 ## Sitting loop
 
-Start a session with `colab --auth=oauth2 new -s <session> --gpu <GPU>` for the accelerator the chosen model needs, then mount Drive as below.
+Start a session with `colab --auth=oauth2 new -s <session> --gpu <GPU>` for the accelerator the chosen model needs. `drivemount` only for the one-time Drive-to-GCS copy; per-task sittings follow WEIGHTS-LOADING.md.
 
 `colab exec` default `--timeout` is 30 s. Expiry does **not** kill guest processes; it only detaches the laptop. Always pass `--timeout 86400`.
 
@@ -82,11 +83,13 @@ Do not blindly re-run `drivemount`. Inside the guest, check `os.path.ismount('/c
 Canonical storage path: `/content/drive/MyDrive/colab_llm/`.
 
 ### Drive caching strategy
-Cold boots on Google Colab burn metered CUs on every session initialization. Cache model weights and binaries on Google Drive under `/content/drive/MyDrive/colab_llm/checkpoints/` to avoid repeated large downloads.
+Drive is the one-time source; each new VM still needs a browser grant for drivemount; after the one-time GCS copy, follow WEIGHTS-LOADING.md (`gcloud storage cp` into `/tmp`, then stop).
 
 ---
 
 ## Tunnel & API key
+
+For fresh-VM-per-task jobs keep I/O on `colab exec` or `colab ssh --proxy-mode`; a public cloudflared `/v1` is a Colab FAQ ToS risk.
 
 ```bash
 cloudflared tunnel --url http://localhost:8080 > /tmp/cloudflared.log 2>&1 &
@@ -138,7 +141,7 @@ runtime.unassign()
 
 ## CU meter & quota management
 
-`colab usage` is available directly in CLI 0.7.4. Cross-check against the web Resources panel before and after every sitting:
+`colab usage` is available directly in CLI 0.7.5. Cross-check against the web Resources panel before and after every sitting:
 
 1. Open https://colab.research.google.com as `zuluzain5@gmail.com`.
 2. Connect or inspect *Runtime → Change runtime type*.
