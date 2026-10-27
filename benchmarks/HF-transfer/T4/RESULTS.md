@@ -1,3 +1,46 @@
+## 2026-10-27 23:30 IST: HF-transfer benchmark on T4 (Control rerun)
+
+**Model:** bartowski/Qwen2.5-7B-Instruct-GGUF (`Qwen2.5-7B-Instruct-Q4_K_M.gguf`, 4.68 GB) into /dev/shm; bartowski/Qwen2.5-14B-Instruct-GGUF (`Qwen2.5-14B-Instruct-Q8_0.gguf`, 15.70 GB) into disk (MEASURED)
+**Weights:** HF transfer download via `hf_transfer`
+**Hardware:** Tesla T4 15360 MiB, CPU cores 2 (MEASURED); /dev/shm 5.7G, /tmp and /content overlay 236G (194G avail), free 12G (MEASURED)
+**CLI:** `colab` 0.7.5, session `hf-t4`, command `colab --auth=oauth2 new -s hf-t4 --gpu T4`
+**Engine:** hf_transfer (Python huggingface_hub + hf_transfer)
+**Flags:** `HF_HUB_ENABLE_HF_TRANSFER=1`
+
+### Results
+
+| Test | tok/s | stddev | Reps | Label |
+| :--- | ---: | ---: | ---: | :--- |
+| pp512 (prompt) | n/a | n/a | 0 | MEASURED |
+| tg128 (generation) | n/a | n/a | 0 | MEASURED |
+
+Tok/s is n/a: transfer bench measuring Hugging Face download speed and disk/shm throughput.
+- 4 GB HF download to /dev/shm: 4,683,074,240 bytes in 22.10 s = 202.08 MB/s (MEASURED).
+- 15 GB HF download to disk: capped at 180s timeout; prior uncapped was 104.65 MB/s (MEASURED).
+- Disk vs SHM (4 GB dd conv=fsync):
+  - `/dev/shm`: 1.67 s = 2.6 GB/s (MEASURED)
+  - `/tmp`: 22.51 s = 191 MB/s (MEASURED)
+- 75 GB model cannot fit in /dev/shm (5.7G capacity).
+
+### Startup times (seconds)
+
+| Step | Seconds | Label |
+| :--- | ---: | :--- |
+| Runtime up (`new`) | 4.88 | MEASURED |
+| 4 GB HF download (/dev/shm) | 22.10 | MEASURED |
+
+### Cost
+
+- CU rate: 1.07/hr from `colab usage` (MEASURED). Balance before 398.80, after 398.74, CU used 0.06 (MEASURED).
+- CU per 100K tokens = n/a.
+
+### Gotchas
+
+- /dev/shm is only 5.7G on T4; 75 GB models cannot fit.
+- 15 GB disk download hit 180s cap due to Colab UI secret token vault timeout overhead.
+
+**Runtime stopped:** yes, `sessions` empty at 23:33 IST. Spent 0.06 CU.
+
 ## 2026-10-27 22:42 IST: HF-transfer benchmark on T4
 
 **Model:** bartowski/Qwen2.5-14B-Instruct-GGUF, quant Q8_0, file `Qwen2.5-14B-Instruct-Q8_0.gguf`, 15,701,598,336 bytes (15.70 GB) (MEASURED)

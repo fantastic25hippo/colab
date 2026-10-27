@@ -107,10 +107,10 @@ T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
 
 | Claim | Status | Notes |
 | :--- | :--- | :--- |
-| 1. HF hf_transfer 500–800 MB/s on Colab | wrong | 104.65 MB/s MEASURED on T4 (15.70 GB in 143.09 s) |
-| 2. 80GB HF pull in 90–150s / under 2 min | wrong | INFERRED ~783 s at 104.65 MB/s MEASURED |
-| 3. rclone copy into /dev/shm for a 75GB model | wrong | /dev/shm capacity is 5.7G MEASURED; 75 GB cannot fit; rclone unmeasured |
-| 4. /dev/shm faster than disk for a 4GB copy | verified | /dev/shm 17.32 s (248 MB/s) vs /tmp 29.29 s (147 MB/s) MEASURED (~1.69x) |
+| 1. HF hf_transfer 500–800 MB/s on Colab | wrong | Peak was 352.98 MB/s on A100 (T4: 104.65, L4: 252.29, G4: 286.16 MB/s) MEASURED |
+| 2. 80GB HF pull in 90–150s / under 2 min | wrong | INFERRED ~783 s (T4) down to ~227 s (A100) at 352.98 MB/s MEASURED (> 2 min) |
+| 3. rclone copy into /dev/shm for a 75GB model | mixed | Checked T4 (5.7G), L4 (26G), A100-40 (41G) — cannot fit; fits only on G4 (87G MEASURED). rclone unmeasured |
+| 4. /dev/shm faster than disk for a 4GB copy | verified | /dev/shm (0.52–1.67 s, up to 8.3 GB/s) vs /tmp (11.83–22.51 s, 191–363 MB/s) MEASURED |
 | 5. laptop HTTP to VM: ssh forward, exec log, cloudflared | mixed | (a) unmeasured/denied (ssh harness denial), (b) verified (exec log RTT 2.92 s MEASURED), (c) untried |
 | 6. Colab FAQ/ToS sentence forbidding ssh/tunnels/web servers | verified | FAQ restricted activities quoted; paid + positive CU lifts SSH restriction |
 | 7. Drive SA rclone with --transfers=12 etc. | unmeasured | `scripts/drive_sa_pull.sh` prepared; unmeasured |
