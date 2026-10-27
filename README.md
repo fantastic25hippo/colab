@@ -22,6 +22,7 @@ The earlier plan (Qwen3.8 Flash-Next NVFP4 on G4 with SGLang, its abliterated fa
 
 | Path | What it is | Date |
 | :--- | :--- | :--- |
+| [`benchmarks/README.md`](benchmarks/README.md) | **Benchmarks.** Entry format, runbook and rules for benching a model on Colab with no trial and error; results go in `benchmarks/<Model>/<GPU>/` and [`benchmarks/INDEX.md`](benchmarks/INDEX.md). No results yet. | 2026-10-27 |
 | [`colab_inference_planning_conversation.md`](colab_inference_planning_conversation.md) | Planning record: performance model, precision guidance, Flint facts, model-first evaluation plan, cost-per-task metric, parent/worker design. | 2026-10-27 |
 | [`GPU and TPU Speed Optimization.md`](GPU%20and%20TPU%20Speed%20Optimization.md) (also `.docx`, `.pdf`, `.zip`) | Audit and corrections of the per-accelerator precision documents, with a best-precision table for each accelerator. | 2026-10-24 |
 | [`research/2026_model_research/`](research/2026_model_research/README.md) | **Current source of truth for model speed and fit.** May to Oct 2026 models across all 7 Colab accelerators. | 2026-10-24 |
