@@ -18,7 +18,8 @@ fi
 # Source folder on Google Drive and destination directory
 DRIVE_SOURCE="${1:-colab_llm}"
 # Destination defaults to /tmp/weights (local disk).
-# Note: /dev/shm (RAM) is optional for faster I/O, but may not fit 75GB models.
+# Note: /dev/shm is 5.7G MEASURED on T4; 75 GB models cannot fit in shm.
+# 4 GB copy bench: /dev/shm 248 MB/s vs /tmp 147 MB/s MEASURED. Use disk for large models.
 DEST_DIR="${2:-/tmp/weights}"
 
 mkdir -p "$DEST_DIR"

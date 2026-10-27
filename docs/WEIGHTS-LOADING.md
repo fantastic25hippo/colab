@@ -17,7 +17,7 @@ Sahil's go. Pointers: [`../ops.md`](../ops.md), [`../hardware.md`](../hardware.m
 | ~75 GB | A100-80 / G4 / H100 with `--high-mem` | ~128 s | ~30 s | ~170 s |
 
 Copy times assume ~600 MB/s (UNVERIFIED). Fallback with no GCS: private Hugging
-Face repo and `HF_XET_HIGH_PERFORMANCE=1` (~450 MB/s ESTIMATE).
+Face repo and `HF_XET_HIGH_PERFORMANCE=1` (~450 MB/s ESTIMATE; T4 hf_transfer was 104.65 MB/s MEASURED).
 
 ## One-time setup (Sahil, once)
 
@@ -107,13 +107,13 @@ T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
 
 | Claim | Status | Notes |
 | :--- | :--- | :--- |
-| 1. HF hf_transfer 500–800 MB/s on Colab | unmeasured | Bench denied (`--tools code` blocks `colab`) |
-| 2. 80GB HF pull in 90–150s / under 2 min | unmeasured | Bench denied |
-| 3. rclone copy into /dev/shm for a 75GB model | unmeasured | /dev/shm capacity on Colab unverified |
-| 4. /dev/shm faster than disk for a 4GB copy | unmeasured | Bench denied |
-| 5. laptop HTTP to VM: ssh forward, exec log, cloudflared | unmeasured | Untested; tunnels forbidden on free/Pro |
-| 6. Colab FAQ/ToS sentence forbidding ssh/tunnels/web servers | unmeasured | ToS text unverified |
-| 7. Drive SA rclone with --transfers=12 etc. | prepared only | `scripts/drive_sa_pull.sh` prepared; not run |
+| 1. HF hf_transfer 500–800 MB/s on Colab | wrong | 104.65 MB/s MEASURED on T4 (15.70 GB in 143.09 s) |
+| 2. 80GB HF pull in 90–150s / under 2 min | wrong | INFERRED ~783 s at 104.65 MB/s MEASURED |
+| 3. rclone copy into /dev/shm for a 75GB model | wrong | /dev/shm capacity is 5.7G MEASURED; 75 GB cannot fit; rclone unmeasured |
+| 4. /dev/shm faster than disk for a 4GB copy | verified | /dev/shm 17.32 s (248 MB/s) vs /tmp 29.29 s (147 MB/s) MEASURED (~1.69x) |
+| 5. laptop HTTP to VM: ssh forward, exec log, cloudflared | mixed | (a) unmeasured/denied (ssh harness denial), (b) verified (exec log RTT 2.92 s MEASURED), (c) untried |
+| 6. Colab FAQ/ToS sentence forbidding ssh/tunnels/web servers | verified | FAQ restricted activities quoted; paid + positive CU lifts SSH restriction |
+| 7. Drive SA rclone with --transfers=12 etc. | unmeasured | `scripts/drive_sa_pull.sh` prepared; unmeasured |
 
 The MEASURED rows above match the report. The report's `new` ~10 s is the only
 disagreement (slower than T4 MEASURED 3.3 s).
