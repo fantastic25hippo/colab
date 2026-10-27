@@ -1,44 +1,34 @@
-# Colab Qwen Worker
+# Colab Inference Worker
 
-Sahil's source of truth for running Qwen on Google Colab (git repository: [`fantastic25hippo/colab`](https://github.com/fantastic25hippo/colab)), billed against a **Google AI Pro 200 CU/month** pool.
-
----
-
-## Current Decision (Short)
-
-The repository implements a **dual-model deployment strategy** tailored to operator intent:
-- **Primary / Leading Candidate:** [`nvidia/Qwen3.8-Flash-Next-NVFP4`](https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4) (or [`RadixArk/Qwen3.8-Flash-Next-NVFP4`](https://huggingface.co/RadixArk/Qwen3.8-Flash-Next-NVFP4)) served via **SGLang (TP=1)** with `--ple-offload-embedding` on **Colab G4** (RTX PRO 6000 Blackwell Server Edition, 96 GB VRAM, ~177 GB host RAM, 8.71 CU/hr). Single-card serving is verified in the official SGLang cookbook (~148 tok/s with MTP).
-- **Fallback: abliterated Flash-Next (TBD, unverified):** An abliterated checkpoint if refusal mitigation is required. Candidates: [`edp1096/Huihui-Qwen3.8-Flash-Next-abliterated-NVFP4-QAD`](https://huggingface.co/edp1096/Huihui-Qwen3.8-Flash-Next-abliterated-NVFP4-QAD) (106 GB), [`claidler/Qwen3.8-Flash-Next-Ablit-NVFP4-QAD-LMHead-NVFP4`](https://huggingface.co/claidler/Qwen3.8-Flash-Next-Ablit-NVFP4-QAD-LMHead-NVFP4) (105.48 GB), and [`Alexsi98/Huihui-Qwen3.8-Flash-Next-abliterated-GGUF`](https://huggingface.co/Alexsi98/Huihui-Qwen3.8-Flash-Next-abliterated-GGUF) (112 GB, GGUF, different runtime). See [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md).
-
-For full technical proofs, rooflines, and the candidate evaluation matrix, see [`decision.md`](decision.md). Factual audit and calculations are maintained in [`claims-ledger.md`](claims-ledger.md).
+Sahil's notes for running open-source models on Google Colab GPUs/TPUs (git repository: [`fantastic25hippo/colab`](https://github.com/fantastic25hippo/colab)), billed against a **Google AI Pro 200 CU/month** pool.
 
 ---
 
-## Quick Start
+## Current Focus
 
-1. **G4 Probe:** Check if your AI Pro account can provision G4 and verify unprivileged host memory pinning (`mlock`):  
-   → Follow [`runbooks/g4-probe.md`](runbooks/g4-probe.md)
-2. **Flash Next SGLang:** Launch the primary Flash-Next NVFP4 worker with SGLang TP=1 on G4:  
-   → Follow [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md)
-3. **Fallback: abliterated Flash-Next (TBD, unverified):** Evaluation and candidate selection across `edp1096`, `claidler`, and `Alexsi98` (GGUF):  
-   → Follow [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md)
+- **Speed.** The only goal right now is the fastest single-stream decode for coding work.
+- **Model by model.** Models are evaluated one at a time (fit, precision, speed ceiling, then a real measurement), not by picking one GPU plan up front.
+- **Starting with Flint.** Per the newest research (2026-10-24), **Flint** (Recursive; 39.8B MoE, ~2.5B active, Apache 2.0, released 2026-10-21) is the speed pick:
+  - [`coding-task-speed-single-stream-2026-10-24.md`](research/2026_model_research/coding-task-speed-single-stream-2026-10-24.md): on A100-40GB, Flint (W4A16 Marlin) is the "single-stream speed champion" at ~810 tok/s roofline, ~0.90 s for a 1k-in / 350-code completion.
+  - [`throughput-tokens-per-second-estimates-2026-10-24.md`](research/2026_model_research/throughput-tokens-per-second-estimates-2026-10-24.md): the same row notes the raw bandwidth math (~815 tok/s) versus a calibrated ~165 tok/s raw decode (~260 tok/s with speculation), and recommends an FP16/BF16 KV cache for Flint.
+  - [`colab_inference_planning_conversation.md`](colab_inference_planning_conversation.md): Flint on TPU v6e using the released INT4 checkpoint (`RecursiveSI/flint-int4`) with bf16 activations and an int8 KV cache, and the open items still to check (INT4 scheme, KV cache size, max context).
+- **Nothing has been run on Colab yet.** All speeds above are research estimates, not measurements.
 
-Account authentication, session persistence, heartbeat, and shutdown procedures are documented in [`ops.md`](ops.md).
+The earlier plan (Qwen3.8 Flash-Next NVFP4 on G4 with SGLang, its abliterated fallback, runbooks, guards and cost model) was removed on 2026-10-27 because the newer research supersedes it. It is still in git history; the last commit that has it is `a65bded`.
 
 ---
 
-## Document Map
+## What Is Here (newest first)
 
-| Document | Role & Description | Status |
+| Path | What it is | Date |
 | :--- | :--- | :--- |
-| [`claims-ledger.md`](claims-ledger.md) | **Source of truth.** Factual and numerical audit of all hardware, checkpoint, runtime, and economic claims across the repo. | Canonical |
-| [`decision.md`](decision.md) | Current architecture decision, candidate evaluation matrix, G4 platform analysis, and grounded economics. | Canonical |
-| [`ops.md`](ops.md) | Colab CLI 0.7.4 workflow, Drive mount, trycloudflare tunnel, heartbeat loops, and watchdog shutdown. | Shipping |
-| [`runbooks/g4-probe.md`](runbooks/g4-probe.md) | Operational probe for G4 entitlement, hardware specs, host mlock, and CU burn. | Shipping |
-| [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md) | Operational step-by-step launch procedure for Flash-Next NVFP4 via SGLang on G4. | Shipping |
-| [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md) | Fallback: abliterated Flash-Next (TBD, unverified) candidate evaluation and testing runbook (`edp1096`, `claidler`, `Alexsi98`). | Shipping |
-| [`hardware.md`](hardware.md) | Google Colab AI Pro runtime hardware specifications & comparison (T4, L4, A100, G4, H100, TPU v5e/v6e). | Reference |
-| [`research/`](research/README.md) | Evidence archive (historical research notes, 27B plan archive, Flash-Next audit dossier, chat traces). | **Archive only** |
+| [`colab_inference_planning_conversation.md`](colab_inference_planning_conversation.md) | Planning record: performance model, precision guidance, Flint facts, model-first evaluation plan, cost-per-task metric, parent/worker design. | 2026-10-27 |
+| [`GPU and TPU Speed Optimization.md`](GPU%20and%20TPU%20Speed%20Optimization.md) (also `.docx`, `.pdf`, `.zip`) | Audit and corrections of the per-accelerator precision documents, with a best-precision table for each accelerator. | 2026-10-24 |
+| [`research/2026_model_research/`](research/2026_model_research/README.md) | **Current source of truth for model speed and fit.** May to Oct 2026 models across all 7 Colab accelerators. | 2026-10-24 |
+| [`research/precision_format/`](research/precision_format/) | One precision-format note per accelerator (L4, A100, G4, T4, TPU v5e, TPU v6e), `.md` and `.pdf`. Corrected by the Speed Optimization document above. | 2026-10-24 to 10-27 |
+| [`NVFP4 Versus FP4 Differences Explained.md`](NVFP4%20Versus%20FP4%20Differences%20Explained.md) | Chat notes on NVFP4 vs FP4. The first part is general; the later parts discuss Qwen3.8 Flash-Next checkpoints and are no longer the focus. | 2026-10-27 (added) |
+| [`ops.md`](ops.md) | Model-independent Colab operations: account, Colab CLI, Drive mount, tunnel and API key, heartbeat, quota. | updated 2026-10-27 |
+| [`hardware.md`](hardware.md) | Google Colab AI Pro runtime hardware specifications and comparison (T4, L4, A100, G4, H100, TPU v5e/v6e). | 2026-10-20 |
 
-> [!IMPORTANT]
-> **Precedence Rule:** `research/` (and historical research dossiers) is strictly an archive. Shipping specifications (`claims-ledger.md`, `decision.md`, `README.md`, `ops.md`, and `runbooks/`) take precedence and win on any conflict.
+> [!NOTE]
+> Where research notes disagree, prefer the newer date. The 2026-10-24 dossier in `research/2026_model_research/` is the newest.

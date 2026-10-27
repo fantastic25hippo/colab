@@ -1,10 +1,7 @@
 # Ops
 
-Account, Colab CLI, Drive, tunnel, heartbeat, client integration, and shutdown.
-Runbooks:
-- G4 Hardware & Entitlement Probe: [`runbooks/g4-probe.md`](runbooks/g4-probe.md)
-- Qwen 3.8 Flash-Next via SGLang: [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md)
-- Fallback: abliterated Flash-Next on G4: [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md)
+Model-independent Colab operations: account, Colab CLI, Drive, tunnel, heartbeat, client integration, and quota.
+Model and hardware choice live in [`research/2026_model_research/`](research/2026_model_research/README.md); the current focus is in [`README.md`](README.md).
 
 ---
 
@@ -58,24 +55,13 @@ client = OpenAI(
 )
 ```
 
-Both clients interact strictly via standard OpenAI `/v1/chat/completions` and `/v1/models` requests authenticated via the pre-shared Bearer token. Neither client requires internal architectural changes to switch between stock and abliterated Flash-Next backends.
+Both clients interact strictly via standard OpenAI `/v1/chat/completions` and `/v1/models` requests authenticated via the pre-shared Bearer token. Neither client requires internal architectural changes to switch model backends.
 
 ---
 
 ## Sitting loop
 
-### Primary (G4 Flash-Next)
-Follow [`runbooks/g4-probe.md`](runbooks/g4-probe.md) first to verify entitlement and host `mlock`. If entitled, launch via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md):
-
-```bash
-colab --auth=oauth2 new -s qwen-g4 --gpu G4 --high-mem
-colab --auth=oauth2 drivemount -s qwen-g4 /content/drive
-# Immediate guard: stop unless RTX PRO 6000 (~95.6 GiB VRAM), High RAM shape (~177 GB / ~48 vCPUs), metered ~8.71–8.90 CU/hr
-```
-
-### Fallback (Abliterated Flash-Next on G4)
-Follow [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md):
-If refusal mitigation is required, deploy an abliterated Flash-Next candidate on G4 using SGLang (same G4 provisioning and flags as primary, pointing `--model-path` to the selected abliterated checkpoint). See [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md).
+Start a session with `colab --auth=oauth2 new -s <session> --gpu <GPU>` for the accelerator the chosen model needs, then mount Drive as below.
 
 `colab exec` default `--timeout` is 30 s. Expiry does **not** kill guest processes; it only detaches the laptop. Always pass `--timeout 86400`.
 
@@ -96,9 +82,7 @@ Do not blindly re-run `drivemount`. Inside the guest, check `os.path.ismount('/c
 Canonical storage path: `/content/drive/MyDrive/colab_llm/`.
 
 ### Drive caching strategy
-Cold boots on Google Colab burn expensive metered CUs on every session initialization. Caching artifacts directly on Google Drive cuts warm-boot latency to under 45 seconds:
-- **Abliterated Fallback on G4**: If an abliterated candidate is selected ([`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md)), its weights (~105–112 GB) should be cached on Drive under `/content/drive/MyDrive/colab_llm/checkpoints/` similarly to the primary checkpoint to eliminate repeated large downloads.
-- **G4 Flash-Next**: The 132.7 GB safetensors checkpoint (`nvidia/Qwen3.8-Flash-Next-NVFP4`) is cached under `/content/drive/MyDrive/colab_llm/checkpoints/nvidia/Qwen3.8-Flash-Next-NVFP4/` to eliminate a 10–20 minute download penalty (~1.5–3.0 CU) on every session.
+Cold boots on Google Colab burn metered CUs on every session initialization. Cache model weights and binaries on Google Drive under `/content/drive/MyDrive/colab_llm/checkpoints/` to avoid repeated large downloads.
 
 ---
 
@@ -135,17 +119,13 @@ If the attached `colab exec` WebSocket drops after 1–3.5 hours, reconnect **wi
 colab exec -s <session> --timeout 86400 -f attach_heartbeat.py
 ```
 
-`attach_heartbeat.py` reads `/tmp/tunnel_url.txt`, verifies `/health` and `cloudflared`, re-emits `TUNNEL_READY_URL=...`, and resumes the heartbeat/watchdog loop. Reconnect within << 10 minutes. Never execute `colab restart-kernel` or `colab stop` during reconnect.
+`attach_heartbeat.py` reads `/tmp/tunnel_url.txt`, verifies `/health` and `cloudflared`, re-emits `TUNNEL_READY_URL=...`, and resumes the heartbeat loop. Reconnect within << 10 minutes. Never execute `colab restart-kernel` or `colab stop` during reconnect.
 
 ---
 
-## Idle watchdog & stop/unassign
+## Stop/unassign
 
-Reset the idle timer on change of `(id_task, n_decoded, n_prompt_tokens_processed, n_prompt_tokens)`. Because `n_decoded` drops to 0 when a generation turn completes, an idle timer that only watches `n_decoded > 0` will prematurely kill a normal pause between agent prompts.
-
-Default idle timeout is **1800 s** (30 min ≈ 2.69 CU on A100 40GB; ~4.36 CU on G4).
-
-When the timer fires:
+Stop a session when work is finished. Inside the guest:
 
 ```python
 from google.colab import runtime
@@ -153,21 +133,6 @@ runtime.unassign()
 ```
 
 `runtime.unassign()` deletes the VM assignment from within the guest and halts billing immediately. The local wrapper on the laptop then runs `colab stop -s <session>` to clean up local `sessions.json`.
-
-A 4-hour hard cutoff is enforced so unattended sessions never run overnight.
-
----
-
-## SKU stop rules
-
-Immediately execute `colab stop -s <session>` (or `runtime.unassign()` from the guest) if any hardware guard fails:
-
-### G4 SKU Guard
-Stop immediately if:
-- GPU is not confirmed as `NVIDIA RTX PRO 6000 Server Edition` (`sm_120`/`sm_120a`).
-- VRAM reported by `nvidia-smi` is not ~95.6 GiB (e.g., fallback to 24 GB L4 or 40 GB A100).
-- High RAM shape was not applied: host RAM is not in the ~177 GB class or the VM reports ~24 vCPUs instead of ~48. The ~90 GB Standard G4 is **not** approved for the primary FP8-PLE launch (Qiita measured High RAM G4 at 176.9 GB, 48 vCPUs; stop if host RAM < 150 GB).
-- Metered burn rate via `colab usage` exceeds the expected High RAM baseline of ~8.71–8.90 CU/hr.
 
 ---
 
@@ -191,9 +156,6 @@ At 0 CU, the backend terminates the VM immediately and the trycloudflare URL die
 2. Clean session state: `colab --auth=oauth2 sessions` → empty.
 3. Quota check: `colab --auth=oauth2 usage` → positive CU balance from 200 CU pool.
 4. Browser profile: Dedicated profile where `authuser=0` is `zuluzain5@gmail.com` for interactive Drive grant.
-5. Provision target GPU:
-   - Run G4 probe ([`runbooks/g4-probe.md`](runbooks/g4-probe.md)) to test G4 **High RAM** entitlement and host `mlock`.
-   - If G4 High RAM passes, serve via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md) (or [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md) if refusal mitigation is required).
-   - If G4 High RAM is unentitled, rejected, or fails host `mlock`, Flash-Next on Colab is blocked; do not substitute a Standard ~90 GB G4 and proceed silently; stop and report.
-6. Verify first-boot log greps, VRAM ceilings, and smoke curl gates.
+5. Provision the GPU the chosen model needs, and confirm the reported GPU, VRAM and host RAM match what you asked for before staging any weights.
+6. Verify the server health and a smoke request before relying on the endpoint.
 7. After work: Ensure session is unassigned and `colab --auth=oauth2 sessions` is empty.
