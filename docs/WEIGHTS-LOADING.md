@@ -103,5 +103,17 @@ T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
 | VRAM delta ≥ 70% of file size | UNVERIFIED (report design) |
 | `--high-mem` avoids 75 GB PD throttle | UNVERIFIED |
 
+## Gemini chat claims: verified or wrong
+
+| Claim | Status | Notes |
+| :--- | :--- | :--- |
+| 1. HF hf_transfer 500–800 MB/s on Colab | unmeasured | Bench denied (`--tools code` blocks `colab`) |
+| 2. 80GB HF pull in 90–150s / under 2 min | unmeasured | Bench denied |
+| 3. rclone copy into /dev/shm for a 75GB model | unmeasured | /dev/shm capacity on Colab unverified |
+| 4. /dev/shm faster than disk for a 4GB copy | unmeasured | Bench denied |
+| 5. laptop HTTP to VM: ssh forward, exec log, cloudflared | unmeasured | Untested; tunnels forbidden on free/Pro |
+| 6. Colab FAQ/ToS sentence forbidding ssh/tunnels/web servers | unmeasured | ToS text unverified |
+| 7. Drive SA rclone with --transfers=12 etc. | prepared only | `scripts/drive_sa_pull.sh` prepared; not run |
+
 The MEASURED rows above match the report. The report's `new` ~10 s is the only
 disagreement (slower than T4 MEASURED 3.3 s).
