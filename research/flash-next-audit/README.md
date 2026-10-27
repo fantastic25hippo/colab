@@ -13,7 +13,7 @@ abliterated Qwen 3.8 27B (`llama.cpp` / A100) to
 A tenth synthesizer session runs after the nine finish.
 
 Do not treat this folder as launch instructions. Shipping docs stay at the
-repo root ([`../../../README.md`](../../../README.md)) until a later sitting promotes a verdict.
+repo root ([`README.md`](../../README.md)) until a later sitting promotes a verdict.
 This dossier is archive; shipping claims-ledger.md / decision.md win on conflict.
 
 ## Source
@@ -21,8 +21,8 @@ This dossier is archive; shipping claims-ledger.md / decision.md win on conflict
 - Chat dump: [`../flash-next-chat.md`](../flash-next-chat.md)
 - Numbered claims: [`CLAIMS.md`](CLAIMS.md)
 - Existing 27B plan (context only): [`../27b-plan/architecture.md`](../27b-plan/architecture.md), [`../27b-plan/plan_audit_and_fixes.md`](../27b-plan/plan_audit_and_fixes.md)
-- Parent research index: [`../../README.md`](../../README.md)
-- Root shipping README: [`../../../README.md`](../../../README.md)
+- Parent research index: [`../README.md`](../README.md)
+- Root shipping README: [`README.md`](../../README.md)
 
 ## Job map
 

@@ -37,6 +37,7 @@ Account authentication, session persistence, heartbeat, and shutdown procedures 
 | [`runbooks/g4-probe.md`](runbooks/g4-probe.md) | Operational probe for G4 entitlement, hardware specs, host mlock, and CU burn. | Shipping |
 | [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md) | Operational step-by-step launch procedure for Flash-Next NVFP4 via SGLang on G4. | Shipping |
 | [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md) | Fallback: abliterated Flash-Next (TBD, unverified) candidate evaluation and testing runbook (`edp1096`, `claidler`, `Alexsi98`). | Shipping |
+| [`hardware.md`](hardware.md) | Google Colab AI Pro runtime hardware specifications & comparison (T4, L4, A100, G4, H100, TPU v5e/v6e). | Reference |
 | [`research/`](research/README.md) | Evidence archive (historical research notes, 27B plan archive, Flash-Next audit dossier, chat traces). | **Archive only** |
 
 > [!IMPORTANT]

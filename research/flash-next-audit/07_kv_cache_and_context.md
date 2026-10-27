@@ -289,7 +289,7 @@ vllm serve nvidia/Qwen3.8-Flash-Next-NVFP4 \
 
 1. **KV Cache Calculation Accuracy:**
    - [`architecture.md`](../27b-plan/architecture.md#L19) states: *"Only the 16 full-attn layers grow KV with context."* Our independent calculations confirm this and establish the exact per-token value (32 KiB at FP8 / 64 KiB at FP16).
-   - In [`research/qwen38_27b_max_tokens_per_second_deep_research.md`](../../qwen38_27b_max_tokens_per_second_deep_research.md#L94), GDN recurrent state is cited as 78.4 MB (BF16) and 153.9 MB (FP32) per slot for 27B. We confirm these exact figures and successfully extend the formula to Flash-Next (58.8 MB BF16 / 115.4 MB FP32 across 36 layers).
+   - In [`research/qwen38_27b_max_tokens_per_second_deep_research.md`](../27b-notes/qwen38_27b_max_tokens_per_second_deep_research.md#L94), GDN recurrent state is cited as 78.4 MB (BF16) and 153.9 MB (FP32) per slot for 27B. We confirm these exact figures and successfully extend the formula to Flash-Next (58.8 MB BF16 / 115.4 MB FP32 across 36 layers).
 2. **100K Context on 40 GB A100 vs. 96 GB G4:**
    - [`architecture.md`](../27b-plan/architecture.md#L76) confirms that 100K context in `q8_0` KV fits on a 40 GB A100 (~23.8–27.6 GiB total used). On a 96 GB G4, 100K context is trivial for both models, consuming only 3.13 GB on 27B and 1.20 GB on Flash-Next at FP8.
 3. **The Chat's Contradiction with Flash-Next Specs:**
