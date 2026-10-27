@@ -1,6 +1,6 @@
 # Runbook: G4 Hardware and Entitlement Probe
 
-Probe procedure for testing NVIDIA G4 entitlement, hardware specifications, host memory pinning (`mlock`), and hourly Compute Unit (CU) burn on Google Colab under the [Google AI Pro](https://support.google.com/googleone/answer/16287313) account (`zuluzain5@gmail.com`).
+Probe procedure for testing NVIDIA G4 entitlement, the High RAM machine shape, hardware specifications, host memory pinning (`mlock`), and hourly Compute Unit (CU) burn on Google Colab under the [Google AI Pro](https://support.google.com/googleone/answer/16287313) account (`zuluzain5@gmail.com`).
 
 Primary references:
 - Google Colab FAQ: https://research.google.com/colaboratory/faq.html
@@ -13,8 +13,8 @@ Primary references:
 
 ## 1. Objectives and Scope
 
-1. **Entitlement Probe**: Determine whether this Google AI Pro account (`zuluzain5@gmail.com`, 200 CU/month) can provision a `--gpu G4` VM.
-2. **Hardware Verification**: Verify that the provisioned GPU is the Blackwell RTX PRO 6000 Server Edition with ~96 GB VRAM and ~177 GB host system RAM.
+1. **Entitlement Probe**: Determine whether this Google AI Pro account (`zuluzain5@gmail.com`, 200 CU/month) can provision a `--gpu G4 --high-mem` VM.
+2. **Hardware Verification**: Verify that the provisioned GPU is the Blackwell RTX PRO 6000 Server Edition with ~96 GB VRAM and that the High RAM shape actually provides ~177 GB host system RAM (Standard G4 is ~90 GB).
 3. **Memory Pinning Probe**: Determine whether the unprivileged Colab user environment permits host memory pinning (`mlock` >= 64 GB) without Docker container privileges.
 4. **Meter Verification**: Confirm the real-time hourly CU burn rate via `colab usage`.
 5. **Fail-Fast Teardown**: Stop the instance immediately upon test completion to avoid unnecessary CU expenditure.
@@ -22,6 +22,7 @@ Primary references:
 > [!IMPORTANT]
 > **UNVERIFIED Status**:
 > - **G4 Entitlement on AI Pro**: An independent Japanese report on `note.com` indicated G4 was grayed out on one AI Pro account. Whether `zuluzain5@gmail.com` can provision G4 remains **UNVERIFIED** until this probe executes.
+> - **G4 High RAM Entitlement**: Colab exposes G4 in two host shapes: Standard (~90 GB RAM, 24 vCPUs) and High RAM (~177 GB RAM, 48 vCPUs). `colab new --high-mem` requires Colab Pro/Pro+ entitlement per the CLI help, so whether this AI Pro account receives a High RAM G4 remains **UNVERIFIED**. Do not assume the ~177 GB shape just because the GPU is G4.
 > - **Colab Docker Availability**: Standard Colab VMs often do not provide Docker or do not have the Docker daemon running. Whether Docker is available and operational on the provisioned Colab VM remains **UNVERIFIED**.
 > - **Colab Native mlock Without Docker**: SGLang `--ple-offload-embedding` requires pinning ~47.7 GiB of host RAM. The cookbook verified path is Docker `--ulimit memlock=-1`, but whether native Colab unprivileged runtimes permit pinning >= 64 GB remains **UNVERIFIED**.
 > - **Server Edition Decode Speed**: Passively cooled Server Edition runs memory at 1,597 GB/s (~10.9% below Workstation Edition's 1,792 GB/s), giving an expected decode speed of ~130–135 tok/s (vs ~148 tok/s in cookbook). This remains **UNVERIFIED** on live Colab silicon.
@@ -49,21 +50,25 @@ colab --auth=oauth2 usage
 
 ## 3. Provisioning Request
 
-Request a G4 instance without `--high-mem`:
+Request a G4 instance with the High RAM shape:
 
 ```bash
-colab --auth=oauth2 new -s g4-probe --gpu G4
+colab --auth=oauth2 new -s g4-probe --gpu G4 --high-mem
 ```
 
+> [!IMPORTANT]
+> The primary Flash-Next recipe offloads a ~47.7 GiB FP8 PLE table into pinned host RAM, so the ~177 GB High RAM shape is the approved target. A Standard G4 (~90 GB) is **not** approved for the primary launch without a separate pinning and SGLang validation run.
+
 ### Immediate Branching Logic:
-- **Case A: Request Rejected or Gated**:
-  If the CLI returns an entitlement error, quota denial, or unsupported accelerator message:
+- **Case A: GPU or High RAM Request Rejected or Gated**:
+  If the CLI returns an entitlement error, quota denial, or unsupported accelerator/memory-shape message:
   1. Record the exact error string.
-  2. Conclude G4 is unentitled for this AI Pro tier.
-  3. G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report.
-  4. Run `colab --auth=oauth2 sessions` to confirm nothing is left allocated.
+  2. Conclude G4 High RAM is unentitled for this AI Pro tier.
+  3. Do not silently retry without `--high-mem` and proceed under the ~177 GB assumption.
+  4. G4 High RAM unavailable → primary Flash-Next launch is blocked; stop and report.
+  5. Run `colab --auth=oauth2 sessions` to confirm nothing is left allocated.
 - **Case B: Session Assigned**:
-  Proceed immediately to Step 4.
+  Proceed immediately to Step 4 and confirm the actual RAM shape before doing anything else.
 
 ---
 
@@ -82,7 +87,12 @@ echo "=== HOST MEMORY ==="
 free -g
 free -m
 
+echo "=== CGROUP MEMORY LIMIT ==="
+cat /sys/fs/cgroup/memory.max 2>/dev/null || true
+cat /sys/fs/cgroup/memory.current 2>/dev/null || true
+
 echo "=== CPU ARCHITECTURE ==="
+nproc
 lscpu | grep -E "Model name|CPU\(s\):|Thread\(s\) per core"
 
 echo "=== FILESYSTEM STORAGE ==="
@@ -94,7 +104,7 @@ df -h / /content
 Halt and unassign the VM immediately (`colab --auth=oauth2 stop -s g4-probe`) if ANY of the following conditions occur:
 1. **GPU is not Blackwell G4**: Name does not identify as `NVIDIA RTX PRO 6000 Server Edition` (or Blackwell `sm_120`/`sm_120a`).
 2. **VRAM is not ~96 GB**: `nvidia-smi` reports total VRAM significantly below ~95.6 GiB (97,896 MiB). If assigned an A100 (40 GB or 80 GB) or L4 (24 GB), STOP.
-3. **Host RAM is not ~177 GB**: Total system RAM reported by `free -g` is in the ~53–84 GB range (standard A100/L4 shapes). Qiita measured G4 host RAM at 176.9 GB with 48 vCPUs. If host RAM < 150 GB, STOP.
+3. **High RAM shape not applied**: Total RAM reported by `free -g` or the cgroup limit is below ~160 GiB, or the VM reports ~24 vCPUs instead of ~48. The ~90 GB / 24 vCPU G4 is the Standard shape; it is **not** approved for the primary FP8-PLE launch. Qiita measured the High RAM G4 at 176.9 GB with 48 vCPUs. STOP and record the observed shape.
 4. **Storage Shortage**: Available disk on `/content` or `/` is < 150 GB (insufficient to stage the 132.7 GB Flash-Next checkpoint).
 
 ---
@@ -179,7 +189,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ"
 colab --auth=oauth2 usage
 ```
 
-Expected metered burn for G4 Server Edition: **~8.71 CU/hr** (measured by Qiita at 8.71 CU/hr; early promotional/off-peak rates of 6.40–6.74 CU/hr are obsolete).
+Expected metered burn for G4 High RAM: **~8.71–8.90 CU/hr** (Qiita measured 8.71 CU/hr; later High RAM samples report 8.90 CU/hr). Early promotional/off-peak rates of 6.40–6.74 CU/hr are obsolete. A Standard G4 may bill lower (~6.40–8.71 CU/hr), but it is not the approved shape for this workload.
 
 Cross-check via Web UI if browser profile `zuluzain5@gmail.com` is active:
 1. Navigate to https://colab.research.google.com
@@ -219,10 +229,10 @@ runtime.unassign()
 
 | Probe Item | Expected Value | Pass Next Step | Fail Remediation |
 | :--- | :--- | :--- | :--- |
-| **G4 Provisioning** | Session created | Proceed to hardware check | G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report. |
+| **G4 Provisioning** | Session created with `--gpu G4 --high-mem` | Proceed to hardware check | G4/High RAM unavailable → primary Flash-Next launch is blocked; stop and report. |
 | **GPU Name** | RTX PRO 6000 Server Edition | Proceed to VRAM check | Terminate session immediately (`colab stop`) |
 | **VRAM Capacity** | ~95.6 GiB (`nvidia-smi`) | Proceed to Host RAM check | Stop immediately; SKU mismatch |
-| **Host System RAM** | ~177 GB (`free -g`) | Proceed to mlock & docker probe | Stop immediately; insufficient RAM for PLE |
+| **High RAM Shape** | ~177 GB (`free -g`/cgroup) and ~48 vCPUs | Proceed to mlock & docker probe | Standard ~90 GB/24 vCPU shape is not approved for the primary FP8-PLE launch; stop. |
 | **Docker Availability** | Daemon active & GPU accessible | Docker `--ulimit memlock=-1` path verified | Native `mlock` / `pin_memory` required |
 | **Native mlock / CUDA Pinning** | 48 GiB pinned OK | Native SGLang permitted | Docker `--ulimit memlock=-1` required; if unavailable: G4 unavailable or mlock fails → Flash-Next on Colab is blocked; stop and report. |
-| **Metered CU Burn** | ~8.71 CU/hr | Record for sitting budget | If > 12 CU/hr, re-evaluate sitting economics |
+| **Metered CU Burn** | ~8.71–8.90 CU/hr | Record for sitting budget | If > 12 CU/hr, re-evaluate sitting economics |

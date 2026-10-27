@@ -1,6 +1,6 @@
 # Runbook: Qwen 3.8 Flash-Next on Colab G4 via SGLang
 
-Operational procedure for deploying and serving `Qwen3.8-Flash-Next-NVFP4` on a single Google Colab NVIDIA G4 instance (RTX PRO 6000 Blackwell Server Edition, 96 GB VRAM, ~177 GB host RAM) using SGLang.
+Operational procedure for deploying and serving `Qwen3.8-Flash-Next-NVFP4` on a single Google Colab NVIDIA G4 instance (RTX PRO 6000 Blackwell Server Edition, 96 GB VRAM, **High RAM** shape with ~177 GB host RAM) using SGLang.
 
 Primary references:
 - Official SGLang Cookbook: https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-Flash-Next
@@ -24,6 +24,9 @@ Qwen 3.8 Flash-Next is an extreme-throughput 125B Mixture-of-Experts (MoE) hybri
 ---
 
 ## 2. Checkpoint Staging and Drive Caching
+
+> [!IMPORTANT]
+> Do not stage or launch until [`g4-probe.md`](g4-probe.md) confirms a G4 **High RAM** VM (~177 GB, ~48 vCPUs). The Standard G4 shape (~90 GB, ~24 vCPUs) is not approved for the primary FP8-PLE recipe.
 
 The NVIDIA checkpoint `nvidia/Qwen3.8-Flash-Next-NVFP4` consists of **132.68 GB (132.7 GB)** across 11 safetensors shards:
 - 78.96 GB for the base MoE and hybrid attention backbone
@@ -70,7 +73,7 @@ The official SGLang cookbook specifies distinct launch requirements depending on
 | **Docker Container** | `lmsysorg/sglang:dev-qwen38-next-local` (requires PR #38121) | `lmsysorg/sglang:dev-qwen38-next-local` (or standard release with FP4 support) |
 | **Tensor Parallelism** | `--tp 1` (verified single RTX PRO 6000 execution) | `--tp 1` |
 | **Host PLE Offload** | `--ple-offload-embedding` | `--ple-offload-embedding` |
-| **Host Memory Requirement** | `>= 64 GB free host RAM` (Colab G4 has ~177 GB host RAM) | `>= 64 GB free host RAM` |
+| **Host Memory Requirement** | `>= 64 GB free host RAM` (requires the Colab G4 **High RAM** shape, ~177 GB; Standard G4 is ~90 GB) | `>= 64 GB free host RAM` (High RAM G4) |
 | **Memory Pinning** | Docker `--ulimit memlock=-1` (Colab Docker availability and native mlock are UNVERIFIED) | Docker `--ulimit memlock=-1` |
 
 ### Option A: Docker Launch (Cookbook Verified Method)
@@ -264,9 +267,9 @@ curl -sf "${SGLANG_URL}/v1/chat/completions" \
 
 During execution of this runbook, the operator must treat the following five items as strictly **UNVERIFIED** until empirical measurements are logged:
 
-1. **AI Pro G4 Entitlement**:
+1. **AI Pro G4 High RAM Entitlement**:
    - *Status*: **UNVERIFIED**.
-   - *Observation*: Whether `colab new --gpu G4` assigns a VM under the Google AI Pro subscription pool without rejection or fallback to A100/L4.
+   - *Observation*: Whether `colab new --gpu G4 --high-mem` assigns a VM under the Google AI Pro subscription pool without rejection or fallback to A100/L4/Standard G4. A ~90 GB Standard G4 is not approved for this FP8-PLE recipe.
 2. **Colab Docker Availability & Native mlock**:
    - *Status*: **UNVERIFIED**.
    - *Observation*: Standard Colab VMs frequently do not provide a running Docker daemon or have Docker installed. Whether Docker is available in the provisioned Colab environment is UNVERIFIED. Furthermore, whether the standard Colab kernel user environment allows pinning >= 64 GB host memory for the 51.2B PLE table outside of Docker is UNVERIFIED. The official cookbook verified path requires Docker with `--ulimit memlock=-1`. Both Docker and native `mlock` must be tested via [`g4-probe.md`](g4-probe.md).

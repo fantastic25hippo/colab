@@ -31,6 +31,12 @@ Ten-paper research dossier auditing hardware, checkpoints, runtime stack, KV cac
 ### 4. Flash-Next Chat Trace (`research/archive/flash-next-chat.md`)
 - [`flash-next-chat.md`](archive/flash-next-chat.md): Raw chat transcript exploring Qwen Flash-Next deployment options on Colab.
 
+### 5. 2026 Colab Model Speed & Fit Research (`research/2026_model_research/`)
+Dossier of research on modern May–Oct 2026 general/coding LLMs across all 7 Colab accelerators (GPUs & TPUs):
+- [`coding-task-speed-single-stream-2026-10-24.md`](2026_model_research/coding-task-speed-single-stream-2026-10-24.md): Single-stream decode speed (tok/s), reasoning token overhead, prefill speed, and 1k-in/350-code E2E completion times across 7 accelerators (4 models per accelerator: 2 Dense + 2 MoE).
+- [`latest-models-gpu-fit-2026-10-24.md`](2026_model_research/latest-models-gpu-fit-2026-10-24.md): Hardware memory sizing matrix and catalog of verified May–Oct 2026 models up to the 33B dense ceiling and 125B MoE architectures.
+- [`throughput-tokens-per-second-estimates-2026-10-24.md`](2026_model_research/throughput-tokens-per-second-estimates-2026-10-24.md): Hardware roofline models, effective memory bandwidths, and optimal precision format calculations.
+
 ---
 
 > [!IMPORTANT]

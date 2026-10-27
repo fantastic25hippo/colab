@@ -27,7 +27,7 @@ To qualify a candidate checkpoint for operational fallback use, it must pass thr
 
 ### Gate 1: Checkpoint Loading Verification
 - **NVFP4 Candidates (`edp1096`, `claidler`)**:
-  Deploy via SGLang using the standard G4 flags from [`flash-next-sglang.md`](flash-next-sglang.md) (TP=1, `--ple-offload-embedding`, no `--quantization` flag).
+  Deploy via SGLang using the standard G4 flags from [`flash-next-sglang.md`](flash-next-sglang.md) (TP=1, `--ple-offload-embedding`, no `--quantization` flag) on a G4 **High RAM** VM confirmed by [`g4-probe.md`](g4-probe.md). Do not use the ~90 GB Standard G4 shape for this FP8-PLE recipe.
   - *Pass Criteria*: SGLang initializes without missing tensor assertions, shape mismatches, or CUDA illegal memory access on Blackwell `sm_120`.
 - **GGUF Candidate (`Alexsi98`)**:
   Test with latest `llama.cpp` build supporting hybrid recurrent GDN layers.

@@ -68,9 +68,9 @@ Both clients interact strictly via standard OpenAI `/v1/chat/completions` and `/
 Follow [`runbooks/g4-probe.md`](runbooks/g4-probe.md) first to verify entitlement and host `mlock`. If entitled, launch via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md):
 
 ```bash
-colab --auth=oauth2 new -s qwen-g4 --gpu G4
+colab --auth=oauth2 new -s qwen-g4 --gpu G4 --high-mem
 colab --auth=oauth2 drivemount -s qwen-g4 /content/drive
-# Immediate guard: stop unless RTX PRO 6000 (~95.6 GiB VRAM), host RAM ~177 GB, metered ~8.71 CU/hr
+# Immediate guard: stop unless RTX PRO 6000 (~95.6 GiB VRAM), High RAM shape (~177 GB / ~48 vCPUs), metered ~8.71–8.90 CU/hr
 ```
 
 ### Fallback (Abliterated Flash-Next on G4)
@@ -166,8 +166,8 @@ Immediately execute `colab stop -s <session>` (or `runtime.unassign()` from the 
 Stop immediately if:
 - GPU is not confirmed as `NVIDIA RTX PRO 6000 Server Edition` (`sm_120`/`sm_120a`).
 - VRAM reported by `nvidia-smi` is not ~95.6 GiB (e.g., fallback to 24 GB L4 or 40 GB A100).
-- Host system RAM is not in the ~177 GB class (Qiita benchmark measured 176.9 GB, 48 vCPUs; stop if host RAM < 150 GB).
-- Metered burn rate via `colab usage` exceeds expected ~8.71 CU/hr standard baseline.
+- High RAM shape was not applied: host RAM is not in the ~177 GB class or the VM reports ~24 vCPUs instead of ~48. The ~90 GB Standard G4 is **not** approved for the primary FP8-PLE launch (Qiita measured High RAM G4 at 176.9 GB, 48 vCPUs; stop if host RAM < 150 GB).
+- Metered burn rate via `colab usage` exceeds the expected High RAM baseline of ~8.71–8.90 CU/hr.
 
 ---
 
@@ -192,8 +192,8 @@ At 0 CU, the backend terminates the VM immediately and the trycloudflare URL die
 3. Quota check: `colab --auth=oauth2 usage` → positive CU balance from 200 CU pool.
 4. Browser profile: Dedicated profile where `authuser=0` is `zuluzain5@gmail.com` for interactive Drive grant.
 5. Provision target GPU:
-   - Run G4 probe ([`runbooks/g4-probe.md`](runbooks/g4-probe.md)) to test G4 entitlement and host `mlock`.
-   - If G4 passes, serve via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md) (or [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md) if refusal mitigation is required).
-   - If G4 is unentitled, rejected, or fails host `mlock`, Flash-Next on Colab is blocked; stop and report.
+   - Run G4 probe ([`runbooks/g4-probe.md`](runbooks/g4-probe.md)) to test G4 **High RAM** entitlement and host `mlock`.
+   - If G4 High RAM passes, serve via [`runbooks/flash-next-sglang.md`](runbooks/flash-next-sglang.md) (or [`runbooks/fallback-abliterated.md`](runbooks/fallback-abliterated.md) if refusal mitigation is required).
+   - If G4 High RAM is unentitled, rejected, or fails host `mlock`, Flash-Next on Colab is blocked; do not substitute a Standard ~90 GB G4 and proceed silently; stop and report.
 6. Verify first-boot log greps, VRAM ceilings, and smoke curl gates.
 7. After work: Ensure session is unassigned and `colab --auth=oauth2 sessions` is empty.
