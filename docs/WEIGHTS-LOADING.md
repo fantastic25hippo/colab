@@ -1,65 +1,57 @@
 # Weights loading (fresh VM per task)
 
 Goal: put GGUF weights on a **new** Colab VM, prove the model is on the GPU, then
-`colab stop`. A VM left up between tasks burns CU. At most **one** human Drive
-approval, ever (the one-time GCS copy). Secrets stay in environment variables.
+`colab stop`. A VM left up between tasks burns CU. Weights load non-interactively
+via Hugging Face shards into `/dev/shm` (no Drive approval, no bucket).
 
 Startup seconds are **ESTIMATE** unless marked MEASURED. Do not spend CU without
 Sahil's go. Pointers: [`../ops.md`](../ops.md), [`../hardware.md`](../hardware.md),
 [`../benchmarks/README.md`](../benchmarks/README.md).
 
-## Size classes — GCS `gcloud storage cp` into `/tmp`
+## Measured path: sharded GGUF into `/dev/shm`
 
-| Class | GPU (see hardware.md) | Copy ESTIMATE | Load ESTIMATE | First token ESTIMATE |
-| :--- | :--- | :--- | :--- | :--- |
-| ~4 GB | T4 or larger | ~7 s | ~4 s | ~25 s (`new` 3.3 s MEASURED on T4) |
-| ~30 GB | A100-40+ with `--high-mem` | ~51 s | ~14 s | ~80 s |
-| ~75 GB | A100-80 / G4 / H100 with `--high-mem` | ~128 s | ~30 s | ~170 s |
+Download sharded GGUF from a public Hugging Face repository into `/dev/shm` using `snapshot_download` with `max_workers=12` and the following flags set:
+- `HF_HUB_ENABLE_HF_TRANSFER=1`
+- `HF_XET_HIGH_PERFORMANCE=1`
+- `HF_XET_RECONSTRUCT_WRITE_SEQUENTIALLY=1`
 
-Copy times assume ~600 MB/s (UNVERIFIED). Fallback with no GCS: private Hugging
-Face repo and `HF_XET_HIGH_PERFORMANCE=1` (~450 MB/s ESTIMATE; T4 hf_transfer was 104.65 MB/s MEASURED).
+### Measured throughput (L4)
+Numbers from `docs/lfm-l4.md`:
+- **Winning path**: L4, 14.88 GB, 16 shards into `/dev/shm`, `max_workers=12`: **16.60 s** (**896 MB/s** MEASURED).
+- **Disk overlay**: 16 shards into disk `/tmp`: **104.82 s** (141.93 MB/s MEASURED). Disk `/tmp` is significantly slower than `/dev/shm`.
+- **Worker counts**: `max_workers=12` is the fastest confirmed setting. `max_workers=8` (61.80 s) and `max_workers=16` (82.30 s) were slower and unconfirmed.
 
-## One-time setup (Sahil, once)
+```python
+import os
+from huggingface_hub import snapshot_download
 
-1. Create a `us-central1` bucket and a Service Account with `roles/storage.objectViewer`.
-2. On the laptop: `export GCP_SA_B64` from the SA JSON. Never commit it.
-3. CPU VM: `colab --auth=oauth2 new -s migrate-once`, then `drivemount` (**the only
-   click**). Activate the SA and copy Drive `models/` into
-   `gs://${BUCKET_NAME}/models/`. Optional: copy a CUDA llama.cpp binary too.
-4. `colab --auth=oauth2 stop -s migrate-once` and check `sessions` is empty.
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
+os.environ["HF_XET_RECONSTRUCT_WRITE_SEQUENTIALLY"] = "1"
 
-```bash
-gcloud storage buckets create "gs://${BUCKET_NAME}" --project="${PROJECT_ID}" \
-  --location="us-central1" --uniform-bucket-level-access
-gcloud iam service-accounts create "${SA_NAME}" --project="${PROJECT_ID}"
-gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
-  --member="serviceAccount:${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --role="roles/storage.objectViewer"
+snapshot_download(
+    repo_id="avgrocketman/LFM2.5-24B-A2B-Q4-shards",
+    allow_patterns=["shards/*"],
+    local_dir="/dev/shm/bundle",
+    max_workers=12,
+)
 ```
 
-## Each task (Grok)
+## Dead plans
 
-Free preflight: `colab version` (0.7.5), `colab --auth=oauth2 whoami`, empty
-`sessions`, positive `usage`. Then:
+- **Google Cloud bucket**: Abandoned (no billing account).
+- **gcsfuse**: Abandoned (FUSE stalls, no billing account).
+- **Drive mount**: Abandoned (a human click on every new VM; slow transfer).
 
-```bash
-# GPU=T4 | L4 | A100 | G4 | H100 ; add --high-mem for ~30 GB and ~75 GB
-colab --auth=oauth2 new -s load --gpu "$GPU"
-colab --auth=oauth2 exec -s load --timeout 86400 \
-  --env GCP_SA_B64="$GCP_SA_B64" --env GCS_MODEL_URI="$GCS_MODEL_URI" <<'PY'
-import base64, os, subprocess
-open("/tmp/sa.json","wb").write(base64.b64decode(os.environ["GCP_SA_B64"]))
-subprocess.check_call(["gcloud","auth","activate-service-account","--key-file=/tmp/sa.json"])
-subprocess.check_call(["gcloud","storage","cp","--user-output-enabled=false",
-                       os.environ["GCS_MODEL_URI"], "/tmp/model.gguf"])
-subprocess.check_call(["nvidia-smi"])
-PY
-# install engine matching nvidia-smi CUDA (T4 was CUDA 13.0, MEASURED), then run
-colab --auth=oauth2 stop -s load
-colab --auth=oauth2 sessions   # must be empty
-```
+## `/dev/shm` sizes per GPU
 
-T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
+| Hardware | `/dev/shm` size | Fits 14.88 GB model? |
+| :--- | :--- | :--- |
+| T4 | 5.7 GB (MEASURED) | No |
+| L4 | 26 GB (MEASURED) | Yes |
+| A100-40 | 41 GB (MEASURED) | Yes |
+| TPU-v5e | 23 GB (MEASURED) | Yes |
+| G4 | 87 GB (MEASURED) | Yes |
 
 ## Health (Council)
 
@@ -79,7 +71,7 @@ T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
 - FUSE mmap (Drive / gcsfuse): stalls over 30 s; tok/s can drop under 0.5.
 - `colab upload` dies at 100 MiB, HTTP 400 (MEASURED).
 - `scp` over `colab ssh` is 3–6 MB/s (MEASURED) — hours for 30–75 GB.
-- Cross-region VM vs `us-central1` bucket: ~200–350 MB/s possible (UNVERIFIED).
+- Google Cloud bucket: no billing account; gcsfuse stalls (DEAD).
 - 75 GB without `--high-mem`: Persistent Disk write throttle (UNVERIFIED).
 - Report `colab new` ~10 s is UNVERIFIED; T4 MEASURED 3.3 s.
 
@@ -98,7 +90,7 @@ T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
 | gdown 24 h lockout | DOCUMENTED (Colab FAQ, gdown #26) |
 | FUSE mmap stalls | DOCUMENTED (GKE Fluid, mmap write-up) |
 | Paid CLI jobs allowed | DOCUMENTED (Colab FAQ) |
-| `gcloud storage cp` ~500–700 MB/s here | UNVERIFIED (report note 10 unnamed; GCP 1 GiB bench) |
+| Google Cloud bucket ~500–700 MB/s | DEAD (no billing account) |
 | HF `hf_xet` ~450 MB/s | UNVERIFIED (Unsloth Colab logs) |
 | VRAM delta ≥ 70% of file size | UNVERIFIED (report design) |
 | `--high-mem` avoids 75 GB PD throttle | UNVERIFIED |
@@ -107,7 +99,7 @@ T4 disk was ~194 GB free (MEASURED). Use `gcloud storage cp`, not `gsutil`.
 
 | Claim | Status | Notes |
 | :--- | :--- | :--- |
-| 1. HF hf_transfer 500–800 MB/s on Colab | wrong | Peak was 352.98 MB/s on A100 (T4: 104.65, L4: 252.29, G4: 286.16 MB/s; TPU-v5e: 222.58 MB/s shm, 106.91 MB/s disk) MEASURED |
+| 1. HF hf_transfer 500–800 MB/s on Colab | verified (shards) | Single blob peaked at 352.98 MB/s on A100; 16 shards into /dev/shm reached 896 MB/s on L4 (MEASURED) |
 | 2. 80GB HF pull in 90–150s / under 2 min | wrong | INFERRED ~783 s (T4) down to ~227 s (A100) at 352.98 MB/s MEASURED (> 2 min) |
 | 3. rclone copy into /dev/shm for a 75GB model | mixed | Checked T4 (5.7G), L4 (26G), A100-40 (41G), TPU-v5e (23G) — cannot fit; fits only on G4 (87G MEASURED). rclone unmeasured |
 | 4. /dev/shm faster than disk for a 4GB copy | verified | /dev/shm (0.52–1.67 s, up to 8.3 GB/s; TPU-v5e 0.77 s, 5.6 GB/s) vs /tmp (11.83–36.39 s, 118–363 MB/s) MEASURED |
