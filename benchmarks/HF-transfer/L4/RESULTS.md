@@ -42,3 +42,14 @@ Tok/s is n/a: transfer bench measuring Hugging Face download speed and disk/shm 
 - HF download to disk reached 252.29 MB/s (vs 104.65 MB/s on T4, ~2.4x speedup).
 
 **Runtime stopped:** yes, `sessions` empty at 23:36 IST. Spent 0.00 CU.
+
+## 2026-10-28 01:10 IST: Persistence & Sharded HF-transfer on L4
+
+**Persistence Check (MEASURED):**
+- Wrote 100 MiB file (`104,857,600` bytes, sha256 `5d6c7f33aff2b4e4d6340ffc12ce52e369e64edfb0e9e296b2eb672539738a9a`) into `/content/persist_100mb.bin` and `/tmp/persist_100mb.bin`, and marker in `/root/persist_marker.txt` on session `l4-persist-1`. Stopped session.
+- Fresh session `l4-bench`: checked all three paths. Result: none survived (`/content` exists=False, `/tmp` exists=False, `/root/persist_marker.txt` exists=False). Persist survive: not (ephemeral).
+- Quotes from CLI help on keeping files between VMs:
+  - `colab upload --help`: "Upload a file to a session" (requires active session; no cross-VM persistence flag).
+  - `colab download --help`: "Download a file from a session" (ephemeral files must be downloaded locally before stop).
+  - `colab new --help`: "Create a new session" (options `--gpu`, `--tpu`, `--high-mem`; no disk retention or attach-existing-disk option).
+
