@@ -27,8 +27,9 @@ def heartbeat():
 
 threading.Thread(target=heartbeat, daemon=True).start()
 info = HfApi().model_info(REPO, files_metadata=True)
-total = sum(s.size or 0 for s in info.siblings)
-print(json.dumps({"repo": REPO, "files": len(info.siblings), "bytes": total, "cpus": os.cpu_count()}), flush=True)
+shards = [s for s in info.siblings if s.rfilename.startswith("shards/")]
+total = sum(s.size or 0 for s in shards)
+print(json.dumps({"repo": REPO, "files": len(shards), "bytes": total, "cpus": os.cpu_count()}), flush=True)
 runs = []
 for dest in DESTS:
     free = shutil.disk_usage(dest).free
@@ -45,7 +46,7 @@ for dest in DESTS:
             stage, t_stage = f"{dest} w={w} rep={rep}", time.time()
             t0 = time.time()
             try:
-                snapshot_download(REPO, local_dir=d, cache_dir=os.path.join(d, ".c"), max_workers=w)
+                snapshot_download(REPO, local_dir=d, cache_dir=os.path.join(d, ".c"), max_workers=w, allow_patterns=["shards/*"])
                 sec = time.time() - t0
                 row = {"dest": dest, "workers": w, "rep": rep, "sec": round(sec, 2), "mb_s": round(total / 1e6 / sec, 1)}
             except Exception as e:
