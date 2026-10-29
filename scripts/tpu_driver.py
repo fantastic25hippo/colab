@@ -37,14 +37,14 @@ def task_install():
     subprocess.run([uv, "venv", "--python", "3.12", "/content/venv312"], check=True)
     wh_ok = False
     try:
-        code_wh = 'from huggingface_hub import hf_hub_download; import subprocess; p=hf_hub_download(repo_id="avgrocketman/tpu-compile-cache", filename="wheels.tar.gz", local_dir="/content"); subprocess.run(["tar", "-xzf", p, "-C", "/content"], check=True)'
+        code_wh = 'from huggingface_hub import hf_hub_download; import subprocess; p=hf_hub_download(repo_id="avgrocketman/tpu-compile-cache", filename="wheels_full.tar", local_dir="/content"); subprocess.run(["tar", "-xf", p, "-C", "/content"], check=True)'
         subprocess.run([sys.executable, "-c", code_wh], check=True)
         r = subprocess.run([uv, "pip", "install", "--python", "/content/venv312/bin/python", "--no-index", "--find-links", "/content/wheels",
                             "vllm-tpu==0.32.0", "tpu-inference==0.32.0", "hf-transfer", "huggingface_hub"], capture_output=True, text=True)
         wh_ok = (r.returncode == 0)
     except Exception: pass
     if not wh_ok:
-        log("Wheel install failed or missing, falling back to online uv pip install...")
+        log("Wheel install fallback to online uv pip install...")
         subprocess.run([uv, "pip", "install", "--python", "/content/venv312/bin/python",
                         "vllm-tpu==0.32.0", "tpu-inference==0.32.0", "hf-transfer", "huggingface_hub"], check=True)
     inst_s[0] = time.time() - t0; log(f"Install done in {inst_s[0]:.2f}s (wheels_used={wh_ok})")
@@ -57,30 +57,31 @@ t_parallel = time.time() - t_cold0
 os.makedirs("/content/hooks", exist_ok=True)
 shutil.copyfile("/content/tpu_bench_hook.py", "/content/hooks/sitecustomize.py")
 env = os.environ.copy()
-env["PYTHONPATH"] = "/content/hooks"
-env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-env["BENCH_LOAD_FIX"] = "1"
-env["JAX_COMPILATION_CACHE_DIR"] = "/content/tpu_compile_cache"
-env["VLLM_XLA_CACHE_PATH"] = "/content/tpu_compile_cache"
-env["JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS"] = "0"
-env["JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES"] = "0"
-env["JAX_LOG_COMPILES"] = "1"
-env["JAX_EXPLAIN_CACHE_MISSES"] = "1"
+env["PYTHONPATH"] = "/content/hooks"; env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"; env["BENCH_LOAD_FIX"] = "1"
+env["JAX_COMPILATION_CACHE_DIR"] = "/content/tpu_compile_cache"; env["VLLM_XLA_CACHE_PATH"] = "/content/tpu_compile_cache"
+env["JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS"] = "0"; env["JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES"] = "0"
+env["JAX_LOG_COMPILES"] = "1"; env["JAX_EXPLAIN_CACHE_MISSES"] = "1"
 
-log("Launching tpu_engine_runner.py...")
-run_cmd = ["/content/venv312/bin/python", "/content/tpu_engine_runner.py", "--model", "/dev/shm/qwen3", "--out", "/content/tpu_engine_results.json"]
+log("Phase B & C: Launching tpu_engine_runner.py (mode=full, gpu-util=0.90)...")
+run_cmd = ["/content/venv312/bin/python", "/content/tpu_engine_runner.py", "--model", "/dev/shm/qwen3", "--mode", "full", "--gpu-util", "0.90", "--out", "/content/tpu_engine_results.json"]
 p = subprocess.Popen(run_cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 with open("/content/driver.log", "w") as lf:
-    for line in p.stdout:
-        sys.stdout.write(line); sys.stdout.flush(); lf.write(line); lf.flush()
-p.wait()
-log(f"Runner process exited with {p.returncode}")
+    for line in p.stdout: sys.stdout.write(line); sys.stdout.flush(); lf.write(line); lf.flush()
+p.wait(); log(f"Main runner exited with {p.returncode}")
 
-eng_res = {}
+log("Phase D: Launching tpu_engine_runner.py (mode=util95, gpu-util=0.95)...")
+run_cmd95 = ["/content/venv312/bin/python", "/content/tpu_engine_runner.py", "--model", "/dev/shm/qwen3", "--mode", "util95", "--gpu-util", "0.95", "--out", "/content/tpu_util95_results.json"]
+p95 = subprocess.Popen(run_cmd95, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+with open("/content/driver.log", "a") as lf:
+    for line in p95.stdout: sys.stdout.write(line); sys.stdout.flush(); lf.write(line); lf.flush()
+p95.wait(); log(f"Util95 runner exited with {p95.returncode}")
+
+eng_res, u95_res = {}, {}
 if os.path.exists("/content/tpu_engine_results.json"):
     with open("/content/tpu_engine_results.json") as f: eng_res = json.load(f)
+if os.path.exists("/content/tpu_util95_results.json"):
+    with open("/content/tpu_util95_results.json") as f: u95_res = json.load(f)
 
-# Cache upload check
 new_compiled = eng_res.get("engine_startup", {}).get("cache_compiled", 0)
 if new_compiled > 0 and os.path.exists("/content/tpu_compile_cache"):
     log(f"New programs compiled ({new_compiled}). Packaging and uploading cache...")
@@ -91,16 +92,16 @@ if new_compiled > 0 and os.path.exists("/content/tpu_compile_cache"):
                   "cache_compiled": new_compiled, "cache_hits": eng_res.get("engine_startup", {}).get("cache_hits", 0)}
         with open("/content/versions.json", "w") as f: json.dump(v_data, f)
         up_code = 'from huggingface_hub import HfApi; api=HfApi(); api.upload_file(path_or_fileobj="/content/tpu_compile_cache.tar", path_in_repo="tpu_compile_cache.tar", repo_id="avgrocketman/tpu-compile-cache"); api.upload_file(path_or_fileobj="/content/versions.json", path_in_repo="versions.json", repo_id="avgrocketman/tpu-compile-cache")'
-        subprocess.run([sys.executable, "-c", up_code], check=True)
-        log("Updated cache uploaded to HF.")
+        subprocess.run(["/content/venv312/bin/python", "-c", up_code], check=True); log("Updated cache uploaded to HF.")
     except Exception as e: log(f"Cache upload err: {e}")
 
 final_rec = {
-    "run_name": "tpu_characterization_final",
+    "run_name": "tpu_confirmation_final",
     "cold_start_breakdown": {
         "download_s": round(dl_s[0], 2), "cache_restore_s": round(cache_s[0], 2),
         "install_s": round(inst_s[0], 2), "parallel_prep_s": round(t_parallel, 2),
         "weights_loaded_s": eng_res.get("engine_startup", {}).get("load_s", 0),
+        "kv_alloc_s": eng_res.get("engine_startup", {}).get("kv_alloc_s", 0),
         "compile_s": eng_res.get("engine_startup", {}).get("compile_s", 0),
         "engine_ready_s": eng_res.get("engine_startup", {}).get("ready_s", 0),
         "first_token_from_ready_s": eng_res.get("engine_startup", {}).get("first_token_from_ready_s", 0),
@@ -111,6 +112,7 @@ final_rec = {
     "step2_decode": eng_res.get("step2_decode", {}),
     "step3_batching": eng_res.get("step3_batching", {}),
     "step4_context": eng_res.get("step4_context", {}),
+    "step5_util95": u95_res,
     "hbm_snapshots": eng_res.get("hbm_snapshots", {})
 }
 

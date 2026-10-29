@@ -41,50 +41,64 @@ def get_usage():
     return res.stdout.strip()
 
 def main():
-    out_dir = "benchmarks/TPU-v5e/tpu-characterization"
+    out_dir = "benchmarks/TPU-v5e/tpu-final"
     os.makedirs(out_dir, exist_ok=True)
-    all_results = []
+    wheel_results, bench_results = [], []
 
     print("=== Checking Initial Compute Units Usage ===", flush=True)
-    u_start = get_usage()
-    print("USAGE_START:\n" + u_start, flush=True)
+    u_start = get_usage(); print("USAGE_START:\n" + u_start, flush=True)
 
-    sess = "tpu-char"
+    # Phase A: VM1 (Wheel Builder)
+    s_vm1 = "tpu-wheel-build"
+    try:
+        print("=== Phase A: Launching VM1 (Wheel Builder) ===", flush=True)
+        print("USAGE_VM1_START:\n" + get_usage(), flush=True)
+        r_new = run_cmd(["colab", "--auth=oauth2", "new", "-s", s_vm1, "--tpu", "v5e1"], capture=False)
+        if r_new.returncode != 0: raise RuntimeError("Failed to create VM1")
+        time.sleep(3)
+        upload_auth_and_scripts(s_vm1, [("scripts/tpu_wheel_builder.py", "/content/tpu_wheel_builder.py")])
+        rc, lines = stream_exec(s_vm1, "scripts/tpu_wheel_builder.py")
+        w_recs = parse_blocks(lines, "WHEEL_BUILD_RESULTS_JSONL")
+        if w_recs: wheel_results.extend(w_recs)
+    finally:
+        print("=== Stopping VM1 ===", flush=True)
+        run_cmd(["colab", "--auth=oauth2", "stop", "-s", s_vm1], capture=False)
+        print("USAGE_VM1_STOP:\n" + get_usage(), flush=True)
+
+    # Phase B, C, D: VM2 (Final Confirmation Run)
+    s_vm2 = "tpu-final"
     t_vm0 = time.time()
     try:
-        r_new = run_cmd(["colab", "--auth=oauth2", "new", "-s", sess, "--tpu", "v5e1"], capture=False)
-        if r_new.returncode != 0:
-            print("Failed to create TPU session. Exiting.", flush=True)
-            sys.exit(1)
+        print("=== Phase B/C/D: Launching VM2 (Final Run) ===", flush=True)
+        print("USAGE_VM2_START:\n" + get_usage(), flush=True)
+        r_new = run_cmd(["colab", "--auth=oauth2", "new", "-s", s_vm2, "--tpu", "v5e1"], capture=False)
+        if r_new.returncode != 0: raise RuntimeError("Failed to create VM2")
         t_vm_ready = time.time() - t_vm0
-        print(f"VM_CREATE_TO_READY_S: {t_vm_ready:.2f}", flush=True)
         time.sleep(3)
-
-        upload_auth_and_scripts(sess, [
+        upload_auth_and_scripts(s_vm2, [
             ("scripts/tpu_bench_hook.py", "/content/tpu_bench_hook.py"),
             ("scripts/tpu_engine_runner.py", "/content/tpu_engine_runner.py"),
             ("scripts/tpu_driver.py", "/content/tpu_driver.py"),
         ])
-
-        rc, lines = stream_exec(sess, "scripts/tpu_driver.py")
-        recs = parse_blocks(lines, "BENCH_RESULTS_JSONL")
-        if recs:
-            for r in recs:
+        rc, lines = stream_exec(s_vm2, "scripts/tpu_driver.py")
+        b_recs = parse_blocks(lines, "BENCH_RESULTS_JSONL")
+        if b_recs:
+            for r in b_recs:
                 if "cold_start_breakdown" in r:
                     r["cold_start_breakdown"]["vm_create_to_shell_ready_s"] = round(t_vm_ready, 2)
-            all_results.extend(recs)
+            bench_results.extend(b_recs)
     finally:
-        print("=== Stopping VM Session ===", flush=True)
-        run_cmd(["colab", "--auth=oauth2", "stop", "-s", sess], capture=False)
-        print("=== Checking Final Compute Units Usage ===", flush=True)
-        u_stop = get_usage()
-        print("USAGE_STOP:\n" + u_stop, flush=True)
+        print("=== Stopping VM2 ===", flush=True)
+        run_cmd(["colab", "--auth=oauth2", "stop", "-s", s_vm2], capture=False)
+        print("USAGE_VM2_STOP:\n" + get_usage(), flush=True)
         print("=== Verifying 0 Active Sessions ===", flush=True)
         run_cmd(["colab", "--auth=oauth2", "sessions"], capture=False)
 
+    all_out = {"wheel_results": wheel_results, "bench_results": bench_results}
     jsonl_p = os.path.join(out_dir, "results.jsonl")
     with open(jsonl_p, "w") as f:
-        for r in all_results: f.write(json.dumps(r) + "\n")
-    print(f"SAVED {len(all_results)} records to {jsonl_p}", flush=True)
+        for r in bench_results: f.write(json.dumps(r) + "\n")
+        for r in wheel_results: f.write(json.dumps(r) + "\n")
+    print(f"SAVED results to {jsonl_p}", flush=True)
 
 if __name__ == "__main__": main()

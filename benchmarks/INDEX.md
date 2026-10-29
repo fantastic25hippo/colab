@@ -4,6 +4,7 @@ One row per entry, newest first. Format and rules: [`README.md`](README.md). Num
 
 | Date (IST) | Model | Quant | GPU | Engine + build | pp512 | tg128 | CU/hr | CU used | Entry |
 | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| 2026-10-29 | Qwen/Qwen3-4B | bf16 | TPU-v5e | vllm-tpu 0.32.0 (confirmation) | 84.92 | 84.92 | 2.92 | 0.52 | [entry](TPU-v5e/tpu-final/RESULTS.md) |
 | 2026-10-29 | Qwen/Qwen3-4B | bf16 | TPU-v5e | vllm-tpu 0.32.0 (char) | 84.33 | 84.92 | 2.92 | 0.24 | [entry](TPU-v5e/tpu-characterization/RESULTS.md) |
 | 2026-10-29 | Qwen/Qwen3-4B | bf16 | TPU-v5e | vllm-tpu 0.32.0 (final) | n/a | 76.69 | 1.50 | 0.70 | [entry](TPU-v5e/qwen3-4b-final/RESULTS.md) |
 | 2026-10-29 | Qwen/Qwen3-4B | bf16 | TPU-v5e | vllm-tpu 0.32.0 | n/a | 83.50 | 1.50 | 0.32 | [entry](TPU-v5e/overhead-two-models/RESULTS.md) |
