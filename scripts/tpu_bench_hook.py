@@ -1,6 +1,7 @@
-import builtins, json, logging, os, sys, time
+import builtins, json, logging, os, sys, threading, time
 
 stats_p = "/tmp/tpu_stats.json"
+stage_req_p = "/tmp/record_hbm_stage.txt"
 cache_stats = {"compiled": 0, "cached": 0}
 
 def _save(stage, data):
@@ -22,13 +23,23 @@ def _get_stats():
         "bytes_limit": int(st.get("bytes_limit", 0)),
     }
 
+def _check_and_save_stage():
+    if os.path.exists(stage_req_p):
+        try:
+            with open(stage_req_p) as f: stage = f.read().strip()
+            if stage:
+                st = _get_stats()
+                _save(stage, st)
+            os.remove(stage_req_p)
+        except Exception: pass
+
 class CacheLogHandler(logging.Handler):
     def emit(self, record):
         msg = record.getMessage()
         if "Persistent compilation cache hit" in msg:
             cache_stats["cached"] += 1
             _save("cache", cache_stats)
-        elif "PERSISTENT COMPILATION CACHE MISS" in msg or "Writing " in msg and "persistent compilation cache" in msg:
+        elif "PERSISTENT COMPILATION CACHE MISS" in msg or ("Writing " in msg and "persistent compilation cache" in msg) or "Compiling " in msg:
             cache_stats["compiled"] += 1
             _save("cache", cache_stats)
 
@@ -41,12 +52,9 @@ def custom_imp(name, *args, **kwargs):
         if not getattr(jmod, "_bench_configured", False):
             jmod._bench_configured = True
             h = CacheLogHandler()
-            c_logger = logging.getLogger("jax._src.compiler")
-            c_logger.addHandler(h)
-            c_logger.setLevel(logging.INFO)
-            cc_logger = logging.getLogger("jax._src.compilation_cache")
-            cc_logger.addHandler(h)
-            cc_logger.setLevel(logging.INFO)
+            for l_name in ["jax._src.compiler", "jax._src.compilation_cache", "jax.interpreters.xla"]:
+                l = logging.getLogger(l_name)
+                l.addHandler(h); l.setLevel(logging.INFO)
 
     w_mod_name = "tpu_inference.models.jax.utils.weight_utils"
     w_mod = sys.modules.get(w_mod_name)
@@ -92,10 +100,6 @@ def custom_imp(name, *args, **kwargs):
 
             o_comp = cls.compile_or_warm_up_model
             def w_comp(self):
-                sizes = os.environ.get("BENCH_COMPILATION_SIZES")
-                if sizes and hasattr(self, "model_runner"):
-                    try: self.model_runner.num_tokens_paddings = json.loads(sizes)
-                    except Exception: pass
                 t0 = time.perf_counter()
                 res = o_comp(self)
                 t1 = time.perf_counter()
@@ -109,10 +113,15 @@ def custom_imp(name, *args, **kwargs):
             o_exec = cls.execute_model
             def w_exec(self, *args, **kwargs):
                 res = o_exec(self, *args, **kwargs)
-                st = _get_stats()
-                _save("after_generation", st)
+                _check_and_save_stage()
                 return res
             cls.execute_model = w_exec
+
+            def _stage_loop():
+                while True:
+                    _check_and_save_stage()
+                    time.sleep(0.1)
+            threading.Thread(target=_stage_loop, daemon=True).start()
 
     return res
 

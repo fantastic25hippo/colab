@@ -41,53 +41,47 @@ def get_usage():
     return res.stdout.strip()
 
 def main():
-    out_dir = "benchmarks/TPU-v5e/qwen3-4b-final"
+    out_dir = "benchmarks/TPU-v5e/tpu-characterization"
     os.makedirs(out_dir, exist_ok=True)
     all_results = []
 
-    print("=== VM1: Start & Pre-Usage ===", flush=True)
-    u_vm1_start = get_usage()
-    print("USAGE_VM1_START:\n" + u_vm1_start, flush=True)
-    s1 = "tpu-bench"
-    try:
-        r1 = run_cmd(["colab", "--auth=oauth2", "new", "-s", s1, "--tpu", "v5e1"], capture=False)
-        if r1.returncode != 0: sys.exit(1)
-        time.sleep(3)
-        upload_auth_and_scripts(s1, [
-            ("scripts/tpu_bench_hook.py", "/content/tpu_bench_hook.py"),
-            ("scripts/tpu_run_single.py", "/content/tpu_run_single.py"),
-            ("scripts/tpu_vm_driver.py", "/content/tpu_vm_driver.py"),
-        ])
-        rc1, lines1 = stream_exec(s1, "scripts/tpu_vm_driver.py")
-        vm1_recs = parse_blocks(lines1, "BENCH_RESULTS_JSONL")
-        all_results.extend(vm1_recs)
-    finally:
-        run_cmd(["colab", "--auth=oauth2", "stop", "-s", s1], capture=False)
-        u_vm1_stop = get_usage()
-        print("USAGE_VM1_STOP:\n" + u_vm1_stop, flush=True)
+    print("=== Checking Initial Compute Units Usage ===", flush=True)
+    u_start = get_usage()
+    print("USAGE_START:\n" + u_start, flush=True)
 
-    print("=== VM2: Fresh Cold Start ===", flush=True)
-    u_vm2_start = get_usage()
-    print("USAGE_VM2_START:\n" + u_vm2_start, flush=True)
-    s2 = "tpu-bench-cold"
+    sess = "tpu-char"
+    t_vm0 = time.time()
     try:
-        r2 = run_cmd(["colab", "--auth=oauth2", "new", "-s", s2, "--tpu", "v5e1"], capture=False)
-        if r2.returncode != 0: sys.exit(1)
+        r_new = run_cmd(["colab", "--auth=oauth2", "new", "-s", sess, "--tpu", "v5e1"], capture=False)
+        if r_new.returncode != 0:
+            print("Failed to create TPU session. Exiting.", flush=True)
+            sys.exit(1)
+        t_vm_ready = time.time() - t_vm0
+        print(f"VM_CREATE_TO_READY_S: {t_vm_ready:.2f}", flush=True)
         time.sleep(3)
-        upload_auth_and_scripts(s2, [
-            ("scripts/tpu_bench_hook.py", "/content/tpu_bench_hook.py"),
-            ("scripts/tpu_run_single.py", "/content/tpu_run_single.py"),
-            ("scripts/tpu_cold_driver.py", "/content/tpu_cold_driver.py"),
-        ])
-        rc2, lines2 = stream_exec(s2, "scripts/tpu_cold_driver.py")
-        vm2_recs = parse_blocks(lines2, "COLD_BENCH_RESULTS_JSONL")
-        all_results.extend(vm2_recs)
-    finally:
-        run_cmd(["colab", "--auth=oauth2", "stop", "-s", s2], capture=False)
-        u_vm2_stop = get_usage()
-        print("USAGE_VM2_STOP:\n" + u_vm2_stop, flush=True)
 
-    run_cmd(["colab", "--auth=oauth2", "sessions"], capture=False)
+        upload_auth_and_scripts(sess, [
+            ("scripts/tpu_bench_hook.py", "/content/tpu_bench_hook.py"),
+            ("scripts/tpu_engine_runner.py", "/content/tpu_engine_runner.py"),
+            ("scripts/tpu_driver.py", "/content/tpu_driver.py"),
+        ])
+
+        rc, lines = stream_exec(sess, "scripts/tpu_driver.py")
+        recs = parse_blocks(lines, "BENCH_RESULTS_JSONL")
+        if recs:
+            for r in recs:
+                if "cold_start_breakdown" in r:
+                    r["cold_start_breakdown"]["vm_create_to_shell_ready_s"] = round(t_vm_ready, 2)
+            all_results.extend(recs)
+    finally:
+        print("=== Stopping VM Session ===", flush=True)
+        run_cmd(["colab", "--auth=oauth2", "stop", "-s", sess], capture=False)
+        print("=== Checking Final Compute Units Usage ===", flush=True)
+        u_stop = get_usage()
+        print("USAGE_STOP:\n" + u_stop, flush=True)
+        print("=== Verifying 0 Active Sessions ===", flush=True)
+        run_cmd(["colab", "--auth=oauth2", "sessions"], capture=False)
+
     jsonl_p = os.path.join(out_dir, "results.jsonl")
     with open(jsonl_p, "w") as f:
         for r in all_results: f.write(json.dumps(r) + "\n")
