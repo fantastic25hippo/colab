@@ -10,11 +10,11 @@ Model-independent engineering guide to achieve minimal cold-start latency on Goo
 | :--- | ---: | ---: | :--- |
 | **Package Install / Venv** | 91.21 s [MEASURED, STARTUP-BREAKDOWN.md:14] | 19.85 s parallel prep [MEASURED, RUN2-COLDSTART.md:13] | **-71.36 s (-78%)** |
 | **Model Weights Download** | 10.14 s [MEASURED, STARTUP-BREAKDOWN.md:12] | Overlapped in 19.85 s prep [MEASURED, RUN2-COLDSTART.md:13] | **Zero added time** |
-| **Imports & Platform Init**| 48.00 s [MEASURED, STARTUP-BREAKDOWN.md:15] | 5.91 s TPU check B [MEASURED, RUN2-COLDSTART.md:14] | **-42.09 s (-88%)** |
+| **Imports & Platform Init**| 48.00 s on ext4 [MEASURED, STARTUP-BREAKDOWN.md:15] | 15.56 s (A) -> 5.91 s (B) [MEASURED, RUN2-COLDSTART.md:14] | -9.65 s from env vars; rest from tmpfs/CPU torch |
 | **Engine Process Spawn**   | 11.00 s [MEASURED, STARTUP-BREAKDOWN.md:18] | 0.00 s (in-process engine) | **Eliminated** |
 | **Weight Load & KV Alloc** | 15.16 s [MEASURED, STARTUP-BREAKDOWN.md:21-22] | Included in engine init | Streamlined |
 | **JAX Compilation**        | 48.46 s warm hit [MEASURED, STARTUP-BREAKDOWN.md:23] | 194.16 s cold miss [MEASURED, RUN2-COLDSTART.md:15] | [UNTESTED warm 32K] |
-| **Total to First Token**   | **233.7 s** [MEASURED, STARTUP-BREAKDOWN.md:8] | **282.46 s cold miss** / **~75–85 s warm** | [UNTESTED warm total] |
+| **Total to First Token**   | **233.7 s** [MEASURED, STARTUP-BREAKDOWN.md:8] | **282.46 s cold miss** [MEASURED] / **~75–85 s warm** | Estimated, not measured (no warm 32K run timed yet) |
 
 ---
 
