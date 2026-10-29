@@ -1,0 +1,17 @@
+{
+  "mount_initial": "shm on /dev/shm type tmpfs (rw,nosuid,nodev,noexec,relatime,size=23526400k)",
+  "mount_after": "shm on /dev/shm type tmpfs (rw,nosuid,nodev,relatime,size=23526400k)",
+  "remount_ok": true,
+  "build_path": "/dev/shm/vllm_env",
+  "install_time_s": 42.08,
+  "compileall_time_s": 47.19,
+  "unpacked_mb": 5132.45,
+  "packed_mb": 1387.55,
+  "pack_time_s": 10.36,
+  "unpack_test_s": 6.17,
+  "nvidia_pkg_count": 0,
+  "tpu_device": "TPU_DEVICES: [TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)]",
+  "upload_confirmed": true,
+  "torch_version": "2.10.0+cpu",
+  "vllm_version": null
+}

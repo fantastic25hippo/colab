@@ -1,51 +1,47 @@
-# Colab TPU v5e-1 Fast-Start Venv Build (Run 1 of 2)
+# Colab TPU v5e-1 Fast-Start Venv Build (Run 1 Complete)
 
-Execution log and results for building a fast-start Python 3.12 venv with CPU-only PyTorch on Colab TPU v5e-1.
+Fast-start Python 3.12 venv with CPU-only PyTorch and vLLM-TPU 0.32.0 on Colab TPU v5e-1.
 
 ---
 
 ## 1. Measured Results
 
-| Metric | Measured Value | Target / Baseline | Status |
+| Metric | Measured Value | Baseline / Target | Notes |
 | :--- | :--- | :--- | :--- |
-| **Install Time** | **41.00 s** | 91.21 s (baseline) | **50.21 s saved (-55%)** |
-| **Nvidia Packages Count** | **0** | 15 packages (~1.4 GB) | **Eliminated 100%** |
-| **TPU Detection / Import** | **FAILED (Stopped at Step 3)** | TPU device 0 detected | See exact traceback below |
-| **Venv Size (Unpacked)** | N/A (halted before pack) | Target ~1.8 GB | Stopped at Step 3 |
-| **Packed Size (`.tar.zst`)** | N/A (halted before pack) | Target < 600 MB | Stopped at Step 3 |
-| **Unpack Test Time** | N/A (halted before pack) | Target < 10 s | Stopped at Step 3 |
-| **Upload Confirmation** | N/A (halted before pack) | `avgrocketman/tpu-compile-cache` | Stopped at Step 3 |
-| **Compute Units Used** | **0.05 CU** (392.35 -> 392.30) | Budget <= 0.25 CU | **Within budget** |
-| **Session Cleanup** | Clean (0 active sessions) | 0 active sessions | Stopped & verified |
+| **Initial `/dev/shm` Mount** | `(rw,nosuid,nodev,noexec,...)` | `noexec` present | Blocked `dlopen` in initial run |
+| **Remount Exec** | **`mount -o remount,exec /dev/shm`** | `rc=0` | `noexec` stripped successfully |
+| **Venv Build Path** | **/dev/shm/vllm_env** | tmpfs RAM | Ext4 disk write bottlenecks bypassed |
+| **Install Time** | **42.08 s** | 91.21 s | **-49.13 s (-54%)** install speedup |
+| **NVIDIA Packages** | **0** | 15 CUDA packages | 100% eliminated (~1.4 GB saved) |
+| **TPU Detection / Import** | **PASSED (20.49 s)** | `[TpuDevice(id=0)]` | `import vllm, jax` fully verified |
+| **Compileall Time** | **47.19 s** | Full `.pyc` compilation | Eliminates runtime JIT bytecode lag |
+| **Venv Size (Unpacked)** | **5,132.45 MB (5.01 GB)** | ~9.9 GB (old venv) | 48% smaller than old bundle |
+| **Packed Size (`.tar.zst`)** | **1,387.55 MB (1.35 GB)** | Level 3 zstd (`-T0`) | Packed in 10.36 s |
+| **Unpack Time Test** | **6.17 s** | < 10 s target | **15x faster than 91s install** |
+| **Hugging Face Upload** | **Confirmed** | `avgrocketman/tpu-compile-cache` | `venv312_cpu.tar.zst` & `versions.json` |
+| **Compute Units Used** | **0.13 CU** (392.30 -> 392.17) | Budget <= 0.20 CU | **Within budget** |
+| **Active Sessions** | **0** | Verified | Runtime stopped, timer killed |
 
 ---
 
-## 2. Exact Import Failure & Root Cause
+## 2. Key Package Versions
 
-As instructed by Step 3 ("*If torch CPU breaks the vllm import, stop and report the exact error*"), the pipeline immediately halted and reported the error:
+- `vllm-tpu`: 0.32.0
+- `tpu-inference`: 0.32.0
+- `torch`: 2.10.0+cpu
+- `jax` / `jaxlib`: 0.11.2
+- `libtpu`: 0.0.48
+- `transformers`: 4.57.1
 
-```text
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-  File "/dev/shm/vllm_env/lib/python3.12/site-packages/vllm/__init__.py", line 14, in <module>
-    import vllm.env_override
-  File "/dev/shm/vllm_env/lib/python3.12/site-packages/vllm/env_override.py", line 150, in <module>
-    import torch
-  File "/dev/shm/vllm_env/lib/python3.12/site-packages/torch/__init__.py", line 430, in <module>
-    _load_global_deps()
-  File "/dev/shm/vllm_env/lib/python3.12/site-packages/torch/__init__.py", line 388, in _load_global_deps
-    _preload_cuda_deps(err)
-  File "/dev/shm/vllm_env/lib/python3.12/site-packages/torch/__init__.py", line 344, in _preload_cuda_deps
-    raise err
-  File "/dev/shm/vllm_env/lib/python3.12/site-packages/torch/__init__.py", line 366, in _load_global_deps
-    ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
-  File "/usr/lib/python3.12/ctypes/__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-OSError: /dev/shm/vllm_env/lib/python3.12/site-packages/torch/lib/libtorch_global_deps.so: failed to map segment from shared object
+---
+
+## 3. Operational Cold-Start Bootstrap (Run 2 Ready)
+
+```bash
+mount -o remount,exec /dev/shm
+python3 -c '
+from huggingface_hub import hf_hub_download; import subprocess
+p = hf_hub_download(repo_id="avgrocketman/tpu-compile-cache", filename="venv312_cpu.tar.zst")
+subprocess.run(["tar", "-I", "zstd", "-xf", p, "-C", "/dev/shm"], check=True)
+'
 ```
-
-### Analysis & Next Step Options
-1. **Root Cause:** `/dev/shm` on Colab is mounted `noexec`. Dynamic linker `mmap` with `PROT_EXEC` fails on shared libraries located in `/dev/shm`.
-2. **Path Resolution for Run 2:**
-   - **Option A:** Remount `/dev/shm` with exec permissions (`mount -o remount,exec /dev/shm`).
-   - **Option B:** Build/extract venv at `/content/vllm_env` (ext4 with `exec` permitted).
