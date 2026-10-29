@@ -4,19 +4,17 @@ Model-independent engineering guide to achieve minimal cold-start latency on Goo
 
 ---
 
-## 1. Where Cold-Start Time Goes
+## 1. Where Cold-Start Time Goes: Baseline vs Fast Pipeline
 
-Baseline naive cold start takes **233.7 s** [MEASURED, STARTUP-BREAKDOWN.md:8]:
-- **Package Install**: **91.21 s** [MEASURED, STARTUP-BREAKDOWN.md:14] installing 259 wheels onto ext4 disk.
-- **Model Download**: **10.14 s** [MEASURED, STARTUP-BREAKDOWN.md:12] to download 7.49 GiB weights via `hf_transfer`.
-- **MainProcess Imports & Platform Init**: **48.00 s** [MEASURED, STARTUP-BREAKDOWN.md:15, 32] importing modules and waiting on GCE metadata 404 retries.
-- **Engine Process Spawn & Re-import**: **11.00 s** [MEASURED, STARTUP-BREAKDOWN.md:18, 34] duplicate module loads under `spawn`.
-- **Device Init & Mesh Setup**: **7.00 s** [MEASURED, STARTUP-BREAKDOWN.md:19, 35] Gloo rendezvous and PJRT discovery.
-- **Abstract Model Tracing**: **0.66 s** [MEASURED, STARTUP-BREAKDOWN.md:20] via `nnx.eval_shape`.
-- **Model Weight Load**: **11.85 s** [MEASURED, STARTUP-BREAKDOWN.md:21] with cache-clearing patch (vs ~30 s baseline [MEASURED, RECIPE.md:48]).
-- **KV Cache Allocation**: **3.31 s** [MEASURED, STARTUP-BREAKDOWN.md:22] allocating HBM buffers.
-- **JAX AOT Lowering & Compilation**: **48.46 s** [MEASURED, STARTUP-BREAKDOWN.md:23] even with 100% cache hits (15.01 s tracing + 32.70 s MLIR lowering [MEASURED, STARTUP-BREAKDOWN.md:46-47]). On a cold cache miss, compilation took **194.16 s** [MEASURED, RUN2-COLDSTART.md:15].
-- **ZMQ Handshake & First Token**: **2.50 s** [MEASURED, STARTUP-BREAKDOWN.md:24-25].
+| Phase | Naive Baseline (234 s) | Fast Pipeline (Run 2) | Gain / Status |
+| :--- | ---: | ---: | :--- |
+| **Package Install / Venv** | 91.21 s [MEASURED, STARTUP-BREAKDOWN.md:14] | 19.85 s parallel prep [MEASURED, RUN2-COLDSTART.md:13] | **-71.36 s (-78%)** |
+| **Model Weights Download** | 10.14 s [MEASURED, STARTUP-BREAKDOWN.md:12] | Overlapped in 19.85 s prep [MEASURED, RUN2-COLDSTART.md:13] | **Zero added time** |
+| **Imports & Platform Init**| 48.00 s [MEASURED, STARTUP-BREAKDOWN.md:15] | 5.91 s TPU check B [MEASURED, RUN2-COLDSTART.md:14] | **-42.09 s (-88%)** |
+| **Engine Process Spawn**   | 11.00 s [MEASURED, STARTUP-BREAKDOWN.md:18] | 0.00 s (in-process engine) | **Eliminated** |
+| **Weight Load & KV Alloc** | 15.16 s [MEASURED, STARTUP-BREAKDOWN.md:21-22] | Included in engine init | Streamlined |
+| **JAX Compilation**        | 48.46 s warm hit [MEASURED, STARTUP-BREAKDOWN.md:23] | 194.16 s cold miss [MEASURED, RUN2-COLDSTART.md:15] | [UNTESTED warm 32K] |
+| **Total to First Token**   | **233.7 s** [MEASURED, STARTUP-BREAKDOWN.md:8] | **282.46 s cold miss** / **~75–85 s warm** | [UNTESTED warm total] |
 
 ---
 
@@ -62,7 +60,7 @@ Running multi-process `spawn` duplicates Python initialization, imports, and met
 
 ## 7. Persistent Compilation Cache Lifecycle
 
-JAX cache keys are cryptographic hashes of lowered StableHLO MLIR modules. Keys depend on `(max_num_seqs, max_model_len, max_num_batched_tokens, software versions)`.
+JAX cache keys are cryptographic hashes of lowered StableHLO MLIR modules, depending on `(max_num_seqs, max_model_len, max_num_batched_tokens, software versions)` [UNTESTED deduction from JAX lowering].
 - Point `VLLM_XLA_CACHE_PATH` and `JAX_COMPILATION_CACHE_DIR` to `/dev/shm/tpu_compile_cache`.
 - On cold cache miss at 32K context, JAX compiled **104 programs in 194.16 s** [MEASURED, RUN2-COLDSTART.md:15].
 - Cache Hit Behavior: Even with 100% cache hits, Python tracing (**15.01 s**) and MLIR lowering (**32.70 s**) still run; cache only skips XLA binary compilation (**3.38 s** hit deserialization) [MEASURED, STARTUP-BREAKDOWN.md:46-48].
@@ -81,7 +79,7 @@ JAX cache keys are cryptographic hashes of lowered StableHLO MLIR modules. Keys 
 ## 9. Memory Budget & Context Headroom
 
 - Target `gpu_memory_utilization=0.90` (allocates **14.17 GiB** max [MEASURED, RECIPE.md:9]).
-- Formula: $\text{Weights} + \text{KV Cache} \le 13.8\text{ GiB}$ [MEASURED, RECIPE.md:11].
+- Formula: $\text{Weights} + \text{KV Cache} \le 13.8\text{ GiB}$ [RULE OF THUMB / UNTESTED formula, RECIPE.md:11].
 - Context scaling: At 26K context (`max_model_len=32768`), in-use HBM reached **14.274 GiB** (90.6%) and peak reached **14.376 GiB** (91.3%), maintaining **1.37 GiB safe headroom** below the 15.748 GiB limit [MEASURED, RUN2-COLDSTART.md:34-36]. Overhead grows with context length.
 
 ---
@@ -90,9 +88,10 @@ JAX cache keys are cryptographic hashes of lowered StableHLO MLIR modules. Keys 
 
 1. **Venv**: Download and unpack prebuilt `venv312_cpu.tar.zst` to `/dev/shm` after `mount -o remount,exec /dev/shm`.
 2. **Weights**: Pull sharded weights to `/dev/shm/<model>` via `snapshot_download` in parallel with venv.
-3. **Settings**: Export `TPU_SKIP_MDS_QUERY=1` topology vars and `VLLM_ENABLE_V1_MULTIPROCESSING=0`.
+3. **Settings & TPU Check**: Export `TPU_SKIP_MDS_QUERY=1` topology vars and `VLLM_ENABLE_V1_MULTIPROCESSING=0`. Always verify with `python -c "import vllm, jax; print(jax.devices())"`.
 4. **Cache Warm-up (Once)**: Run one compile session with `max_num_seqs` matching expected concurrency; pack `/dev/shm/tpu_compile_cache` to tar and upload to HF.
 5. **Cold Serving**: On future fresh VMs, extract compile cache to `/dev/shm/tpu_compile_cache` before starting engine.
+6. **Warmup**: Always send 1 untimed dummy request before benchmarking or serving user queries.
 
 ---
 
@@ -100,5 +99,5 @@ JAX cache keys are cryptographic hashes of lowered StableHLO MLIR modules. Keys 
 
 1. **Warm 32K Cache Startup Time**: Exact startup duration restoring `tpu_compile_cache_b1_32k.tar` is [UNTESTED] (142 s startup expected to drop to ~48 s based on [MEASURED, RECIPE.md:100], but unmeasured for 32K).
 2. **30K Prefill Latency**: Measured 0.09 s for 25.7K tokens [MEASURED, RUN2-COLDSTART.md:31] is [UNTESTED / SUSPICIOUS], likely an internal timing artifact from KV-cache re-use or asynchronous dispatch.
-3. **26K Decode Speed**: Decode throughput dropping to 10.20 tok/s at 26K context [MEASURED, RUN2-COLDSTART.md:32] vs 88.58 tok/s at batch 1 short context remains [UNTESTED / UNEXPLAINED] (attention quadratic scaling vs memory bound).
+3. **26K Decode Speed**: Decode throughput dropping to 10.20 tok/s at 26K context [MEASURED, RUN2-COLDSTART.md:32] vs 88.58 tok/s at batch 1 short context is cause unknown [UNTESTED]. Earlier runs measured ~70 tok/s at 16K context [MEASURED, RECIPE.md:111], making 10 tok/s at 26K look especially suspicious.
 4. **Colab Image Portability**: Whether `mount -o remount,exec /dev/shm` and static topology vars are universally supported across all Google Colab backend VM image variants is [UNTESTED].
