@@ -4,6 +4,7 @@ One row per entry, newest first. Format and rules: [`README.md`](README.md). Num
 
 | Date (IST) | Model | Quant | GPU | Engine + build | pp512 | tg128 | CU/hr | CU used | Entry |
 | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| 2026-10-29 | Qwen/Qwen3-4B | bf16 | TPU-v5e | vllm-tpu 0.32.0 (final) | n/a | 76.69 | 1.50 | 0.70 | [entry](TPU-v5e/qwen3-4b-final/RESULTS.md) |
 | 2026-10-29 | Qwen/Qwen3-4B | bf16 | TPU-v5e | vllm-tpu 0.32.0 | n/a | 83.50 | 1.50 | 0.32 | [entry](TPU-v5e/overhead-two-models/RESULTS.md) |
 | 2026-10-28 | LFM2.5-24B-A2B | Q4 (sharded) | L4 | hf_transfer (llama-server did not load) | n/a | n/a | 1.54 | 0.32 | [entry](LFM2.5-24B-A2B-Q4/L4/RESULTS.md) |
 | 2026-10-28 | HF-transfer | sharded (LFM-24B-Q4) | CPU | not measured | n/a | n/a | 0.00 | 0.00 | [entry](HF-transfer/CPU/RESULTS.md) |
