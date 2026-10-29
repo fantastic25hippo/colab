@@ -1,0 +1,50 @@
+{
+  "t_remount_s": 0.08,
+  "venv_prep": {
+    "dl_s": 13.5,
+    "unpack_s": 6.35,
+    "total_s": 19.85
+  },
+  "weights_dl_s": 11.89,
+  "parallel_prep_s": 19.85,
+  "check_a_s": 15.56,
+  "check_b_s": 5.91,
+  "check_b_used": true,
+  "total_cold_start_to_first_token_s": 282.46,
+  "engine": {
+    "engine_init_s": 194.16,
+    "compile_count": 104,
+    "ttft_short_s": 0.0755,
+    "first_token_ts": 1793289997.0752702,
+    "decode_runs": [
+      {
+        "tokens": 256,
+        "wall_s": 2.9551,
+        "tok_s": 88.55
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.9533,
+        "tok_s": 88.61
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.954,
+        "tok_s": 88.59
+      }
+    ],
+    "mean_decode_tok_s": 88.58,
+    "ctx_30k": {
+      "tokens": 25706,
+      "prefill_s": 0.09,
+      "decode_tok_s": 10.2,
+      "wall_s": 3.13
+    },
+    "hbm": {
+      "in_use_gib": 14.274,
+      "peak_gib": 14.376,
+      "limit_gib": 15.748
+    }
+  },
+  "cache_tar_mb": 53.66
+}
