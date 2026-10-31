@@ -1,6 +1,10 @@
-# Qwen/Qwen3-4B Final Characterization on Colab TPU v5e-1
+# Qwen/Qwen3-4B Early Bucket & Cache Study on Colab TPU v5e-1
 
-Final characterization of vLLM runtime memory overhead, startup latencies, compilation caching, and accelerated cold start on Google Colab TPU v5e-1 (16 GB HBM2; 15.75 GiB usable).
+> [!WARNING]
+> **Superseded for decode speed & bucket guidance by [`../tpu-characterization/RESULTS.md`](../tpu-characterization/RESULTS.md) and [`../tpu-final/RESULTS.md`](../tpu-final/RESULTS.md).**
+> While the `jax.clear_caches()` weight-loading fix discovered here (29.40 s $\rightarrow$ 10.70 s) and the 47–67 MiB net runtime overhead measurement remain valid, restricting `compilation_sizes=[16, 512]` or setting `SKIP_JAX_PRECOMPILE=1` caused 60–76 uncompiled shapes plus per-step `tpu_bench_hook.py` disk I/O to collapse decode to 7.6–30.4 tok/s. With default precompile buckets and out-of-band timing, true single-stream decode is **84.92–88.58 tok/s**.
+
+Early characterization of vLLM runtime memory overhead, startup latencies, compilation caching, and accelerated cold start on Google Colab TPU v5e-1 (16 GB HBM2; 15.75 GiB usable).
 
 ## Environment & Versions
 

@@ -14,30 +14,23 @@
 - **Colab GPU Runtime:** NVIDIA L4 (12 vCPU, 26G shm, 23034 MiB VRAM, nvidia-smi Driver 580.82.07, CUDA 13.0, 1.54 CU/hr).
 - **Compute Consumed:** Total CU used 0.32 CU (MEASURED, from INDEX).
 - **CPU Benchmark Note:** CPU TBD row in `benchmarks/INDEX.md` is not MEASURED.
-- **Engine Pin:** Pin llama.cpp b11954 Ubuntu tarballs (`llama-b11954-bin-ubuntu-x64.tar.gz` and `llama-b11954-bin-ubuntu-cuda-13.4-x64.tar.gz`). CUDA 12.8 /health was ready=False at 180s (MEASURED); do not pin 12.8. Never cmake or git clone on Colab.
+- **Engine Pin:** Pin llama.cpp b11954 Ubuntu tarballs (`llama-b11954-bin-ubuntu-x64.tar.gz` and `llama-b11954-bin-ubuntu-cuda-13.4-x64.tar.gz`). CUDA 12.8 `/health` was `ready=False` at 180s (MEASURED); **no decode speed (tg128) has been measured for LFM on L4 yet**. Never cmake or git clone on Colab.
 
-### Measured Download Sweep (Job 20261028-173833-lfm-l4-sweep-94e4)
-Execution duration ~996s MEASURED across benchmarks:
+### Measured Download Sweep
+Full tables live in [`../benchmarks/LFM2.5-24B-A2B-Q4/L4/RESULTS.md`](../benchmarks/LFM2.5-24B-A2B-Q4/L4/RESULTS.md) and [`../benchmarks/HF-transfer/L4/SWEEP.md`](../benchmarks/HF-transfer/L4/SWEEP.md). Summary:
 - **Rank-1 Path / Production Configuration:**
-  - Flags: `HF_HUB_ENABLE_HF_TRANSFER=1`, `HF_XET_HIGH_PERFORMANCE=1`, `HF_XET_RECONSTRUCT_WRITE_SEQUENTIALLY=1`.
-  - Target: 16 shards to `/dev/shm`, `snapshot_download` with `max_workers=12`.
-  - Result: 16.60 s / 896.13 MB/s (MEASURED, WINNER).
-- **Worker Sweep (16 shards to /dev/shm):**
-  - `w=1`: 48.50 s / 306.73 MB/s (MEASURED)
-  - `w=2`: 26.08 s / 570.38 MB/s (MEASURED)
-  - `w=4`: 17.51 s / 849.53 MB/s (MEASURED)
-  - `w=8`: 61.80 s / 240.72 MB/s (MEASURED) - collapsed UNCONFIRMED
-  - `w=12`: 16.60 s / 896.13 MB/s (MEASURED, WINNER)
-  - `w=16`: 82.30 s / 180.76 MB/s (MEASURED) - collapsed UNCONFIRMED
-- **Single Blob vs Shards:**
-  - Blob to `/dev/shm`: 23.61 s / 630.12 MB/s (MEASURED).
-  - Blob to `/tmp`: 44.71 s / 332.75 MB/s (MEASURED) - `/tmp` much slower.
-- **Destination & Flag Degradation (at w=12):**
-  - Disk overlay `/tmp/w_best`: 104.82 s / 141.93 MB/s (MEASURED) - disk overlay `/tmp` is much slower than `/dev/shm`.
-  - Flags-off degradation:
-    - `HF_HUB_ENABLE_HF_TRANSFER=0`: 76.62 s / 194.18 MB/s (MEASURED).
-    - `HF_XET_HIGH_PERFORMANCE=0`: 72.80 s / 204.34 MB/s (MEASURED).
-    - `HF_XET_RECONSTRUCT_WRITE_SEQUENTIALLY=0`: 71.32 s / 208.60 MB/s (MEASURED).
+  - Target: 16 shards to `/dev/shm`, `snapshot_download` with `max_workers=12` (or `8..12`).
+  - Result: **16.60 s / 896.13 MB/s** (MEASURED, single-run winner); **920.8 MB/s** 3-rep mean in `SWEEP.md`.
+- **Worker Count Variance (`SWEEP.md`, 3 reps × 5 worker counts):**
+  - `w=4`: mean 695.0 MB/s (peak 995.4 MB/s)
+  - `w=8`: mean 746.3 MB/s (peak 1,097.7 MB/s)
+  - `w=12`: mean 920.8 MB/s (peak 1,119.7 MB/s)
+  - `w=16`: mean 460.9 MB/s (peak 995.1 MB/s)
+  - `w=24`: mean 276.4 MB/s (peak 533.3 MB/s)
+  - *Conclusion*: The single-rep slow pulls at `w=8` (61.80 s) and `w=16` (82.30 s) in the first job were Hub throttling noise, not worker collapse.
+- **Single Blob vs Shards & `/dev/shm` vs `/tmp`:**
+  - Blob to `/dev/shm`: 23.61 s / 630.12 MB/s vs Blob to `/tmp`: 44.71 s / 332.75 MB/s.
+  - 16 shards to `/tmp`: 104.82 s / 141.93 MB/s (disk overlay `/tmp` is ~6× slower than `/dev/shm`).
 
 ### Production Download Recommendation
 To pull weights on L4:
@@ -63,18 +56,12 @@ To pull weights on L4:
 **Do not resume without a new user "go" gate.**
 
 ### Incomplete (Blocked Until Go)
-- **CUDA 13.4 llama-server /health on L4**: CUDA 12.8 failed with driver/CUDA mismatch; winner download never got successful GPU load and health verification.
-- **8-shard and 32-shard Hub layouts plus timed pulls**: Only 16-shard layout is MEASURED; 8-shard and 32-shard layouts remain to be generated and measured.
-- **Re-time w=8 and w=16 on L4**: Confirm timings and collapse UNCONFIRMED status.
-- **Commit/push L4 RESULTS**: `benchmarks/INDEX.md` has a CPU TBD row; do not mark it MEASURED.
-- **Repo stale-fact cleanup frozen**: Paused until user unblocks.
-- **Prebuilt llama-bin.tar.gz missing from repo**.
-- **`~/.config/colab-cli/token.json` permissions**: Still mode 664 (target mode: 600).
-- **Second L4 benchmark script**: `scripts/hf_bench_lfm_l4_more.py` did not finish execution.
+- **CUDA 13.4 llama-server `/health` and decode benchmark on L4**: CUDA 12.8 failed with driver/CUDA mismatch; winner download never got successful GPU load, health verification, or `tg128` measurement.
+- **8-shard and 32-shard Hub layouts plus timed pulls**: Only 16-shard layout is MEASURED.
 
 ### Already Done (Do Not Redo)
 - Public repo `avgrocketman/LFM2.5-24B-A2B-Q4-shards` is live (blob + 16 shards).
-- First L4 download sweep MEASURED; winner is 16 shards into `/dev/shm` at `max_workers=12` (~16.60 s / 896 MB/s).
+- First L4 download sweep and 3-rep worker sweep (`SWEEP.md`) MEASURED; winner is 16 shards into `/dev/shm` at `max_workers=12` (~16.60 s / 896–921 MB/s).
 - Leftover L4 session stopped; CU/hr 0.00.
 
 ### Resume Recipe After Go

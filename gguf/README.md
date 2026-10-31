@@ -43,25 +43,21 @@ Deposited Unsloth Dynamic 4-bit GGUF models (`UD-Q4_K_XL`) in llama.cpp format.
   - `/content` double-copy on Colab instances: Anti-pattern (use `/dev/shm` directly).
 - **Fast-Path Ingestion**: Server-side copy (`copy_files` / `hf cp`) is the preferred fast path when weights are already present on the Hub, executing in seconds without local bandwidth or compute consumption.
 - **LFS Mechanics**: Hugging Face LFS uploads require computing the SHA256 upfront before the upload request starts. Consequently, single-blob streaming remains serial (`GET` then `PUT`). Multi-shard architectures can pipeline downloading shard `n+1` while uploading shard `n`.
-- **Local Hygiene Status**:
-  - `~/.config/colab-cli/token.json` permissions: Currently `664`; needs remediation to `600`.
-  - SSH configuration: Missing `~/.ssh/config` entry for automated tunnels.
-  - Binaries: Precompiled `llama-bin.tar.gz` bundle not yet staged on Hugging Face.
-  - Automation scripts: `run_*_session.sh` orchestration script pending.
-  - Lifecycle management: Trap-to-`colab stop` wrapper script pending implementation.
+- **Status of GGUF Benchmarks**:
+  - `LFM2.5-24B-A2B-Q4`: Sharded into `avgrocketman/LFM2.5-24B-A2B-Q4-shards` (public) and download-benchmarked on L4 (16.60 s into `/dev/shm`); `llama-server` decode pending CUDA 13.4 binary test (see [`../docs/lfm-l4.md`](../docs/lfm-l4.md)).
+  - `Flint`: Deposited in `avgrocketman/flint-GGUF` (25.1 GB single blob); unsharded and unbenchmarked on Colab GPU.
 - **Resource Accounting & Policy**:
-  - Compute Units Balance: 398.08 CU available (burn rate: 0 CU/hr; active sessions: 0 / empty).
+  - Check live CU balance via `colab --auth=oauth2 usage` before and after every session.
   - Inference Gate: Do not start any L4, A100, or G4 instances for inference until Sahil explicitly gives approval.
 
-## Execution Model
+## Execution Model (Planned for GGUF / `llama.cpp`)
 
-These GGUF weights are formatted for inference via `llama.cpp` / `llama-server`.
+These GGUF weights are formatted for inference via `llama.cpp` / `llama-server` (pin `llama-b11954-bin-ubuntu-cuda-13.4-x64.tar.gz` on Colab CUDA 13.0 drivers; never compile from source).
 
 Execution strategy on Colab:
-- Direct download from private Hugging Face Hub directly into memory (`/dev/shm/bundle`) to bypass slow disk I/O.
-- Run `llama-server` with `--no-mmap` to keep weights pinned in RAM/VRAM.
-- Expose inference endpoint over SSH loopback tunnel.
-- Scripted trap handler ensuring immediate runtime shutdown (`colab stop`) upon exit or interruption.
+- Direct download of sharded GGUF from Hugging Face Hub into `/dev/shm/bundle` (`snapshot_download`, `max_workers=12`).
+- Run `llama-server` with `--no-mmap -ngl 99` to keep weights pinned in VRAM.
+- Keep I/O on `colab exec` (with a 20 s heartbeat) or `colab ssh --proxy-mode`, and always run `colab stop` in a `finally:` block.
 
 ## Next Steps
 

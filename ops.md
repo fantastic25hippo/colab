@@ -12,13 +12,13 @@ Per-task weight loading is [`docs/WEIGHTS-LOADING.md`](docs/WEIGHTS-LOADING.md).
 | :--- | :--- |
 | CLI identity | `<your-google-account>` |
 | Token | `~/.config/colab-cli/token.json` |
-| Plan | Google AI Pro → **200 CU / month** pool |
+| Plan | Google AI Pro → **~400 CU observed** monthly pool (nominal 200 CU; check `colab usage`) |
 | CLI | `google-colab-cli==0.7.5` |
 | Auth | `--auth=oauth2`. Grant all OAuth scopes. |
 
-Do not print or commit `token.json`. Keep existing CLI identity intact.
+Do not print or commit `token.json` (ensure `chmod 600 ~/.config/colab-cli/token.json`). Keep existing CLI identity intact.
 
-`"You are not subscribed"` in the Colab UI is expected: Google AI Pro does not badge as Colab Pro. Paid-plan GPUs draw directly from the positive 200 CU monthly balance.
+`"You are not subscribed"` in the Colab UI is expected: Google AI Pro does not badge as Colab Pro. Paid-plan GPUs draw directly from the positive CU balance.
 
 ---
 
@@ -64,7 +64,7 @@ Start a session with `colab --auth=oauth2 new -s <session> --gpu <GPU>` for the 
 
 `colab exec` default `--timeout` is 30 s. Expiry does **not** kill guest processes; it only detaches the laptop. Always pass `--timeout 86400`.
 
-Google AI Pro has **no background execution**. Fire-and-exit exec is reaped in ~10–15 min even if the server is serving over trycloudflare. `start_server.py` must stay in a 20–25 s stdout heartbeat loop polling `/health` and `/slots`.
+Google AI Pro has **no background execution**. Fire-and-exit exec is reaped in ~10–15 min even if the server is serving over trycloudflare. Any long-running server wrapper must stay in a 20–25 s stdout heartbeat loop polling `/health` and `/slots`.
 
 ---
 
@@ -94,22 +94,16 @@ Persist the parsed URL to `/tmp/tunnel_url.txt`. Wait 5–8 s (or resolve agains
 
 ---
 
-## Heartbeat and reconnect
+## Heartbeat and reconnect (design pattern for long-running sessions)
 
-To survive ephemeral client disconnections and prevent Google AI Pro's ~10–15 minute reaper from killing the VM, `start_server.py` implements strict subprocess isolation and heartbeat logging:
+To survive ephemeral client disconnections and prevent Google AI Pro's ~10–15 minute reaper from killing the VM, a server wrapper script (if used) must implement strict subprocess isolation and heartbeat logging:
 
 1. **Process Isolation (`start_new_session=True`)**: Spawn model engine and `cloudflared` as independent process group leaders.
 2. **File-Backed Logs (No `subprocess.PIPE`)**: Redirect child logs to disk (`/tmp/llama-server.log` or `/tmp/sglang.log`, `/tmp/cloudflared.log`) to avoid pipe buffer deadlocks.
 3. **Tunnel URL Persistence**: Poll `/tmp/cloudflared.log` to extract the `trycloudflare.com` URL, wait 5–8 s for DNS propagation, write it to `/tmp/tunnel_url.txt`, and print `TUNNEL_READY_URL=https://...` with `flush=True`.
 4. **Heartbeat Loop**: Every 20–25 s, poll `/health` and `/slots` (or `/v1/models`), confirm child processes are alive, and print a heartbeat line to stdout with `flush=True`.
 
-If the attached `colab exec` WebSocket drops after 1–3.5 hours, reconnect **without reloading weights**:
-
-```bash
-colab exec -s <session> --timeout 86400 -f attach_heartbeat.py
-```
-
-`attach_heartbeat.py` reads `/tmp/tunnel_url.txt`, verifies `/health` and `cloudflared`, re-emits `TUNNEL_READY_URL=...`, and resumes the heartbeat loop. Reconnect within << 10 minutes. Never execute `colab restart-kernel` or `colab stop` during reconnect.
+If the attached `colab exec` WebSocket drops after 1–3.5 hours, reconnect **without reloading weights** by running a reconnect script that reads `/tmp/tunnel_url.txt`, verifies `/health`, and resumes the 20–25 s stdout heartbeat loop within << 10 minutes. Never execute `colab restart-kernel` or `colab stop` during reconnect.
 
 ## Stop/unassign
 
@@ -140,7 +134,7 @@ Do not provision a VM merely to inspect quota. Check quota beforehand. At 0 CU, 
 
 1. Workstation identity check: `colab --auth=oauth2 whoami` → `<your-google-account>`.
 2. Clean session state: `colab --auth=oauth2 sessions` → empty.
-3. Quota check: `colab --auth=oauth2 usage` → positive CU balance from 200 CU pool.
+3. Quota check: `colab --auth=oauth2 usage` → positive CU balance (~400 CU pool).
 4. Browser profile: Dedicated profile where `authuser=0` is `<your-google-account>` if web UI is needed.
 5. Provision the GPU the chosen model needs; confirm GPU, VRAM and host RAM match before staging weights.
 6. Verify server health and smoke request before relying on endpoint.

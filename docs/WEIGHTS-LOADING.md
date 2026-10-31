@@ -8,18 +8,18 @@ Startup seconds are **ESTIMATE** unless marked MEASURED. Do not spend CU without
 Sahil's go. Pointers: [`../ops.md`](../ops.md), [`../hardware.md`](../hardware.md),
 [`../benchmarks/README.md`](../benchmarks/README.md).
 
-## Measured path: sharded GGUF into `/dev/shm`
+## Measured path: sharded weights into `/dev/shm`
 
-Download sharded GGUF from a public Hugging Face repository into `/dev/shm` using `snapshot_download` with `max_workers=12` and the following flags set:
-- `HF_HUB_ENABLE_HF_TRANSFER=1`
-- `HF_XET_HIGH_PERFORMANCE=1`
-- `HF_XET_RECONSTRUCT_WRITE_SEQUENTIALLY=1`
+Download sharded GGUF or safetensors from Hugging Face into `/dev/shm` using `snapshot_download` with `max_workers=8..12` (see [`../research/03-HuggingFace-Xet-Tuning.md`](../research/03-HuggingFace-Xet-Tuning.md)):
+- `HF_XET_HIGH_PERFORMANCE=1` (with `hf_xet >= 1.7.0`)
+- `HF_HUB_ENABLE_HF_TRANSFER=1` (used in measured runs; note `research/03` & `11` state Xet is now the default backend)
 
-### Measured throughput (L4)
-Numbers from `docs/lfm-l4.md`:
-- **Winning path**: L4, 14.88 GB, 16 shards into `/dev/shm`, `max_workers=12`: **16.60 s** (**896 MB/s** MEASURED).
-- **Disk overlay**: 16 shards into disk `/tmp`: **104.82 s** (141.93 MB/s MEASURED). Disk `/tmp` is significantly slower than `/dev/shm`.
-- **Worker counts**: `max_workers=12` is the fastest confirmed setting. `max_workers=8` (61.80 s) and `max_workers=16` (82.30 s) were slower and unconfirmed.
+### Measured throughput (L4 & TPU v5e-1)
+Numbers from [`docs/lfm-l4.md`](lfm-l4.md), [`../benchmarks/HF-transfer/L4/SWEEP.md`](../benchmarks/HF-transfer/L4/SWEEP.md), and [`../benchmarks/TPU-v5e/FAST-COLDSTART.md`](../benchmarks/TPU-v5e/FAST-COLDSTART.md):
+- **L4 winning path**: 14.88 GB, 16 shards into `/dev/shm`, `max_workers=12`: **16.60 s** (**896 MB/s** MEASURED; 3-rep sweep mean **920.8 MB/s**).
+- **L4 worker counts (`SWEEP.md`)**: `max_workers=8..12` recommended. Across 3 reps, `w=4,8,12,16` all hit **940–1,120 MB/s** on unthrottled pulls and **190–316 MB/s** when Hub-throttled; the earlier single-rep slow timings at `w=8` (61.8 s) and `w=16` (82.3 s) were random throttling variance, not worker collapse.
+- **L4 disk overlay**: 16 shards into disk `/tmp`: **104.82 s** (141.93 MB/s MEASURED). Disk `/tmp` is ~5–6× slower than `/dev/shm`.
+- **TPU v5e-1**: `Qwen/Qwen3-4B` (7.49 GiB safetensors) into `/dev/shm`: **10.14–11.89 s** (**~645–755 MB/s** MEASURED), overlapped with prebuilt `venv312_cpu.tar.zst` download/unpack in **19.85 s total** (see [`../benchmarks/TPU-v5e/FAST-COLDSTART.md`](../benchmarks/TPU-v5e/FAST-COLDSTART.md)).
 
 ```python
 import os
@@ -45,13 +45,13 @@ snapshot_download(
 
 ## `/dev/shm` sizes per GPU
 
-| Hardware | `/dev/shm` size | Fits 14.88 GB model? |
-| :--- | :--- | :--- |
-| T4 | 5.7 GB (MEASURED) | No |
-| L4 | 26 GB (MEASURED) | Yes |
-| A100-40 | 41 GB (MEASURED) | Yes |
-| TPU-v5e | 23 GB (MEASURED) | Yes |
-| G4 | 87 GB (MEASURED) | Yes |
+| Hardware | `/dev/shm` size | Fits 14.88 GB LFM Q4? | Fits 25.1 GB Flint Q4? |
+| :--- | :--- | :--- | :--- |
+| T4 | 5.7 GB (MEASURED) | No | No |
+| L4 | 26 GB (MEASURED) | Yes | Tight / No |
+| A100-40 | 41 GB (MEASURED) | Yes | Yes |
+| TPU-v5e | 23 GB (MEASURED) | Yes | No |
+| G4 | 87 GB (MEASURED) | Yes | Yes |
 
 ## Health (Council)
 
@@ -105,8 +105,8 @@ snapshot_download(
 | 4. /dev/shm faster than disk for a 4GB copy | verified | /dev/shm (0.52–1.67 s, up to 8.3 GB/s; TPU-v5e 0.77 s, 5.6 GB/s) vs /tmp (11.83–36.39 s, 118–363 MB/s) MEASURED |
 | 5. laptop HTTP to VM: ssh forward, exec log, cloudflared | mixed | (a) unmeasured/denied (ssh harness denial), (b) verified (exec log RTT 2.92 s MEASURED), (c) untried |
 | 6. Colab FAQ/ToS sentence forbidding ssh/tunnels/web servers | verified | FAQ restricted activities quoted; paid + positive CU lifts SSH restriction |
-| 7. Drive SA rclone with --transfers=12 etc. | unmeasured | `scripts/drive_sa_pull.sh` prepared; unmeasured |
-| 8. TPU weight loading & engine compatibility | verified | TPU v5e: 2.92 CU/hr, 23G /dev/shm, JAX preinstalled; GGUF/llama.cpp lacks native TPU support (requires JAX/Pallas, torch_xla, or vLLM TPU). TPU v6e (`--tpu v6e1`) timed out during provisioning on repeated attempts (capacity unavailable, 0 CU spent). |
+| 7. Drive SA rclone with --transfers=12 etc. | unmeasured | Unmeasured (superseded by HF shards into `/dev/shm`) |
+| 8. TPU weight loading & engine compatibility | verified | TPU v5e: 2.92 CU/hr, 23G `/dev/shm`, `vllm-tpu==0.32.0` + `tpu-inference==0.32.0` verified at **84.92 tok/s** on `Qwen/Qwen3-4B` (see [`../benchmarks/TPU-v5e/RECIPE.md`](../benchmarks/TPU-v5e/RECIPE.md)). TPU v6e (`--tpu v6e1`) timed out during provisioning on repeated attempts (0 CU spent). |
 
 The MEASURED rows above match the report. The report's `new` ~10 s is the only
 disagreement (slower than T4 MEASURED 3.3 s).

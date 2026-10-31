@@ -1,5 +1,8 @@
 # vLLM Memory Overhead & Startup Times on Colab TPU v5e-1
 
+> [!NOTE]
+> **Historical baseline run.** See [`../tpu-final/RESULTS.md`](../tpu-final/RESULTS.md) and [`../FAST-COLDSTART.md`](../FAST-COLDSTART.md) for the final confirmation run (84.92 tok/s single-stream, 1,653.4 tok/s Batch 32) and the `/dev/shm` CPU-torch cold-start pipeline.
+
 Benchmark measurements of vLLM startup phases, runtime memory overhead, and warm compile reuse on Google Colab TPU v5e-1 (16 GB HBM2; 15.75 GiB usable).
 
 ## Environment & Versions

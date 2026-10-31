@@ -4,17 +4,19 @@ Model-independent engineering guide to achieve minimal cold-start latency on Goo
 
 ---
 
-## 1. Where Cold-Start Time Goes: Baseline vs Fast Pipeline
+## 1. Where Cold-Start Time Goes: Baseline (`17.4K` Warm) vs Fast Pipeline (`32K` Cold)
 
-| Phase | Naive Baseline (234 s) | Fast Pipeline (Run 2) | Gain / Status |
+*Note: Naive Baseline ran at `max_model_len=17408` with a warm XLA cache (`tpu_compile_cache.tar`), while Run 2 tested the new `/dev/shm` pipeline at `max_model_len=32768` on a cold 32K cache (depositing `tpu_compile_cache_b1_32k.tar`). Non-compilation setup dropped from **185.2 s to 25.8 s (-159.4 s)**.*
+
+| Phase | Naive Baseline (`17.4K`, `tpu-final`) | Fast Pipeline (`32K`, `RUN2-COLDSTART`) | Gain / Status |
 | :--- | ---: | ---: | :--- |
 | **Package Install / Venv** | 91.21 s [MEASURED, STARTUP-BREAKDOWN.md:14] | 19.85 s parallel prep [MEASURED, RUN2-COLDSTART.md:13] | **-71.36 s (-78%)** |
 | **Model Weights Download** | 10.14 s [MEASURED, STARTUP-BREAKDOWN.md:12] | Overlapped in 19.85 s prep [MEASURED, RUN2-COLDSTART.md:13] | **Zero added time** |
-| **Imports & Platform Init**| 48.00 s on ext4 [MEASURED, STARTUP-BREAKDOWN.md:15] | 15.56 s (A) -> 5.91 s (B) [MEASURED, RUN2-COLDSTART.md:14] | -9.65 s from env vars; rest from tmpfs/CPU torch |
-| **Engine Process Spawn**   | 11.00 s [MEASURED, STARTUP-BREAKDOWN.md:18] | 0.00 s (in-process engine) | **Eliminated** |
-| **Weight Load & KV Alloc** | 15.16 s [MEASURED, STARTUP-BREAKDOWN.md:21-22] | Included in engine init | Streamlined |
-| **JAX Compilation**        | 48.46 s warm hit [MEASURED, STARTUP-BREAKDOWN.md:23] | 194.16 s cold miss [MEASURED, RUN2-COLDSTART.md:15] | [UNTESTED warm 32K] |
-| **Total to First Token**   | **233.7 s** [MEASURED, STARTUP-BREAKDOWN.md:8] | **282.46 s cold miss** [MEASURED] / **~75–85 s warm** | Estimated, not measured (no warm 32K run timed yet) |
+| **Imports & Platform Init**| 48.00 s on ext4 [MEASURED, STARTUP-BREAKDOWN.md:15] | 15.56 s (A) -> 5.91 s (B) [MEASURED, RUN2-COLDSTART.md:14] | **-42.09 s** (-9.65 s from MDS vars; rest from tmpfs/CPU torch) |
+| **Engine Process Spawn**   | 11.00 s [MEASURED, STARTUP-BREAKDOWN.md:18] | 0.00 s (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) | **-11.00 s (Eliminated)** |
+| **Weight Load & KV Alloc** | 15.16 s (`11.85s` w/ `clear_caches` patch + `3.31s` KV) | Included in engine init | Keep `jax.clear_caches` patch (`RECIPE.md` §3) |
+| **JAX Compilation**        | 48.46 s (`17.4K` warm hit, 261 hits / 0 compiles) | 194.16 s (`32K` cold miss, 104 programs compiled) | Warm 32K cache deposited (`53.66 MB`); warm 32K timing [UNTESTED] |
+| **Total to First Token**   | **235.33 s** [MEASURED, `tpu-final/RESULTS.md`] | **282.46 s (`32K` cold miss)** [MEASURED] / **~75–85 s warm [ESTIMATE]** | Warm `/dev/shm` + warm cache is estimated at ~75–85 s |
 
 ---
 
@@ -88,7 +90,7 @@ JAX cache keys are cryptographic hashes of lowered StableHLO MLIR modules, depen
 
 1. **Venv**: Download and unpack prebuilt `venv312_cpu.tar.zst` to `/dev/shm` after `mount -o remount,exec /dev/shm`.
 2. **Weights**: Pull sharded weights to `/dev/shm/<model>` via `snapshot_download` in parallel with venv.
-3. **Settings & TPU Check**: Export `TPU_SKIP_MDS_QUERY=1` topology vars and `VLLM_ENABLE_V1_MULTIPROCESSING=0`. Always verify with `python -c "import vllm, jax; print(jax.devices())"`.
+3. **Settings, Loader Patch & TPU Check**: Install the `jax.clear_caches` `sitecustomize.py` hook (`RECIPE.md` §3, saves ~18–29 s during weight loading), and export `TPU_SKIP_MDS_QUERY=1` topology vars + `VLLM_ENABLE_V1_MULTIPROCESSING=0`. Always verify with `python -c "import vllm, jax; print(jax.devices())"`.
 4. **Cache Warm-up (Once)**: Run one compile session with `max_num_seqs` matching expected concurrency; pack `/dev/shm/tpu_compile_cache` to tar and upload to HF.
 5. **Cold Serving**: On future fresh VMs, extract compile cache to `/dev/shm/tpu_compile_cache` before starting engine.
 6. **Warmup**: Always send 1 untimed dummy request before benchmarking or serving user queries.

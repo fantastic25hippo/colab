@@ -1,10 +1,11 @@
 # Research
 
-Research notes, newest first. Where notes disagree, prefer the newer one.
+Research notes and pre-benchmark analyses, newest first. **Measured benchmarks in [`../benchmarks/INDEX.md`](../benchmarks/INDEX.md) always override estimates here.**
 
-| Folder | Contents | Date |
+| File / Folder | Contents | Date |
 | :--- | :--- | :--- |
-| [`2026_model_research/`](2026_model_research/README.md) | **Current.** Model speed, fit and throughput estimates for May to Oct 2026 models on all 7 Colab accelerators. Flint is the single-stream speed pick on A100-40GB. | 2026-10-24 |
-| [`precision_format/`](precision_format/) | Best precision format per accelerator: [L4](precision_format/L4%20GPU%20Precision%20Formats%20on%20Colab.md), [A100](precision_format/Optimal%20Precision%20Formats%20for%20A100.md), [G4](precision_format/Optimal%20Precision%20Formats%20for%20G4%20GPU.md), [T4](precision_format/Optimal%20Precision%20Formats%20for%20T4.md), [TPU v5e](precision_format/Optimal%20TPU%20v5e%20Precision%20Formats.md), [TPU v6e](precision_format/TPU%20v6e%20Precision%20Formats.md) (each also as `.pdf`). Audited in [`../GPU and TPU Speed Optimization.md`](../GPU%20and%20TPU%20Speed%20Optimization.md). | 2026-10-24 to 10-27 |
+| [`00-INDEX.md`](00-INDEX.md) | **Master Index (`00`–`11`).** Start here for consolidated notes on Colab hardware (`01`), storage (`02`), HF Xet (`03`), L4 loading (`04`), Colab CLI (`05`), agent workflows (`06`), TPU v5e runtime (`07`/`07b`), quantization (`08`), cold start (`09`), LFM2.5 (`10`), and conflict verification (`11`). | 2026-10-31 |
+| [`2026_model_research/`](2026_model_research/README.md) | **Pre-benchmark estimates.** Model speed, fit, and throughput estimates for May–Oct 2026 models across Colab accelerators. | 2026-10-24 |
+| [`precision_format/`](precision_format/) | **Per-accelerator precision notes (estimates):** [L4](precision_format/L4%20GPU%20Precision%20Formats%20on%20Colab.md), [A100](precision_format/Optimal%20Precision%20Formats%20for%20A100.md), [G4](precision_format/Optimal%20Precision%20Formats%20for%20G4%20GPU.md), [T4](precision_format/Optimal%20Precision%20Formats%20for%20T4.md), and [TPU v6e](precision_format/TPU%20v6e%20Precision%20Formats.md). For TPU v5e, see [`08-TPU-v5e-Quantization.md`](08-TPU-v5e-Quantization.md). | 2026-10-27 |
 
-Older research (the 27B notes and plan, the Flash-Next audit and chat) was removed on 2026-10-27. It is in git history at commit `a65bded`.
+Older research (27B notes, Flash-Next audit, and raw deep-research dumps) is preserved in git history (`a65bded` and prior commits).

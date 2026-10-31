@@ -1,71 +1,51 @@
 # Benchmarks
 
-Measured results for running models on Colab GPUs and TPUs, written so a future Grok can bench a new model with no trial and error.
+Measured results for running models on Colab GPUs and TPUs, written so an agent can benchmark a model with zero trial and error.
 
-**Goal.** Sahil downloads a model, asks Grok to bench it, and Grok benches it by following this file. Nothing here is a guess unless it says `ESTIMATE` or `UNVERIFIED`.
+**Goal.** Nothing here is a guess unless explicitly labeled `ESTIMATE` or `UNVERIFIED`.
 
 ## Where to look, where to write
 
-- Read first: [`../ops.md`](../ops.md) (CLI, Drive, quota), [`../hardware.md`](../hardware.md) (accelerators, CU rates), [`../docs/WEIGHTS-LOADING.md`](../docs/WEIGHTS-LOADING.md) (how weights get onto a fresh VM), [`../research/`](../research/README.md) (speed estimates, not measurements).
-- Results: `benchmarks/<Model>/<GPU>/RESULTS.md`, model first, then GPU, e.g. `benchmarks/Spark-X2.6-4B/T4/RESULTS.md`. Newest entry on top. Optional raw logs sit beside it in `logs/`.
-- Index: one line per entry appended to [`INDEX.md`](INDEX.md).
-- Entry format: copy [`_TEMPLATE.md`](_TEMPLATE.md). Every field is required; write `n/a` and why if one cannot be filled.
-- Names: `<Model>` = model name and size as on the card (`Spark-X2.6-4B`). `<GPU>` = `T4`, `L4`, `A100-40`, `A100-80`, `G4`, `TPU-v5e`, `TPU-v6e`. No empty folders: create a folder with its first entry.
+- **Read first:** [`../ops.md`](../ops.md) (CLI, quota), [`../hardware.md`](../hardware.md) (accelerators, measured CU/hr), [`../docs/WEIGHTS-LOADING.md`](../docs/WEIGHTS-LOADING.md) (sharded HF pulls into `/dev/shm`), [`TPU-v5e/RECIPE.md`](TPU-v5e/RECIPE.md) & [`TPU-v5e/FAST-COLDSTART.md`](TPU-v5e/FAST-COLDSTART.md) (TPU v5e-1 serving and fast cold start), and [`../research/00-INDEX.md`](../research/00-INDEX.md) (consolidated research).
+- **Results layout:**
+  - Model benchmarks on GPU: `benchmarks/<Model>/<GPU>/RESULTS.md` (e.g. [`LFM2.5-24B-A2B-Q4/L4/RESULTS.md`](LFM2.5-24B-A2B-Q4/L4/RESULTS.md)).
+  - TPU v5e-1 runs: `benchmarks/TPU-v5e/<run>/RESULTS.md` (e.g. [`TPU-v5e/tpu-final/RESULTS.md`](TPU-v5e/tpu-final/RESULTS.md)).
+  - Transfer sweeps: `benchmarks/HF-transfer/<GPU>/RESULTS.md`.
+- **Index:** Append one row per entry (newest first) to [`INDEX.md`](INDEX.md).
+- **Entry format:** Copy [`_TEMPLATE.md`](_TEMPLATE.md). Every field is required; write `n/a` and why if a field does not apply.
 
 ## Rules
 
-1. Never run a model from the Drive mount. Copy the weights to local `/tmp` first and time the copy.
-2. After the one-time Drive-to-GCS copy in WEIGHTS-LOADING.md, pull `gs://${BUCKET_NAME}/models/<name>.gguf` into `/tmp`. Do not re-download from Hugging Face when the object is already in GCS.
-3. No keys, tokens, OAuth files or any account email in this repo, in logs or in commit messages. The repo is public.
-4. One short run (about 10 minutes). If something fails, record the failure, do not improvise a bigger run.
-5. Always stop the runtime at the end (`colab --auth=oauth2 stop -s <session>`), then verify `colab --auth=oauth2 sessions` is empty. Do this even when a step failed.
-6. Spend CU only with Sahil's go. Bots never log in, never type Google codes, never approve Drive.
-7. Label every number `MEASURED` (from your run) or `ESTIMATE`. Copy nothing from `research/` as measured.
+1. **Stage weights in `/dev/shm` from Hugging Face Hub.** Never run a model from a Google Drive FUSE mount, never use `colab drivemount` (interactive on every new VM), and do not use GCS buckets (no billing account). Pull sharded weights directly into `/dev/shm` (`snapshot_download`, `max_workers=8..12`); see [`../docs/WEIGHTS-LOADING.md`](../docs/WEIGHTS-LOADING.md).
+2. **No secrets.** Never put keys, tokens, OAuth files, or account emails in this repo, on CLI argv, in logs, or in commit messages. Upload `/content/hf_token` via `colab upload` when a private repo is required.
+3. **One bounded run.** Keep runs short and deterministic. Always emit a stdout line every ~20 s so `colab exec` flushes and the Colab reaper does not kill the VM.
+4. **Always stop the runtime** at the end (`colab --auth=oauth2 stop -s <session>`), then verify `colab --auth=oauth2 sessions` is empty. Wrap session lifecycle in `try: ... finally:`.
+5. **Spend CU only with Sahil's explicit go.**
+6. **Label every number** `MEASURED` (from a live run) or `ESTIMATE`.
 
-## The Colab CLI (`colab`, version 0.7.5 on the box)
+## The Colab CLI (`colab`, version 0.7.5)
 
-- Global flag first: `colab --auth=oauth2 <subcommand>`. Check with `colab version` and `colab --auth=oauth2 whoami`.
-- `new -s NAME --gpu T4|L4|G4|H100|A100` or `--tpu v5e1|v6e1`; always pass `-s`. A wrong `--gpu` silently gives an A100. A 400 on `new` means no entitlement. (VERIFIED from `colab skill`.)
-- `exec -s NAME -f FILE.py --timeout SECONDS` runs Python on the VM. Default timeout is 30 s, so always set it. Kernel state persists between `exec` calls. `--env KEY=VALUE` sets variables.
-- `drivemount -s NAME` is interactive and needs the human's browser approval on every new VM. A bot must stop and ask Sahil. Run without a human it printed the approval link, then failed with HTTP 400 after 90 s (seen 2026-10-27).
-- `usage` prints balance and hourly rate (`Current balance`, `Usage rate: N/hr`). `status -s NAME` shows hardware. `sessions` lists runtimes. `stop -s NAME` releases the VM.
-- `colab run [--gpu T4] script.py` = new + exec + stop in one command and has no drivemount; use it only when weights come from GCS / `--env`. Per-task path is WEIGHTS-LOADING.md.
+- Global flag first: `colab --auth=oauth2 <subcommand>`. Verify with `colab version` and `colab --auth=oauth2 whoami`.
+- `new -s NAME --gpu T4|L4|G4|H100|A100` or `--tpu v5e1|v6e1`; always pass `-s`. Note: `v6e1` timed out repeatedly during provisioning on 2026-10-28 (capacity unavailable, 0 CU spent).
+- `exec -s NAME -f FILE.py --timeout 86400` runs Python on the VM. Default timeout is 30 s, so always pass `--timeout 86400`.
+- `usage` prints current balance and hourly rate (`Current balance`, `Usage rate: N/hr`). `sessions` lists active runtimes. `stop -s NAME` releases the VM.
 
-## Measured once: T4 runtime, 2026-10-27 (IST), from an aborted proof attempt
+## Verified Engines per Accelerator
 
-- MEASURED: runtime up in 3.3 s (`new`). Rate 1.07 CU/hr (`usage`). Balance read 400.00 CU before.
-- MEASURED: driver 580.82.07, CUDA 13.0, Tesla T4 15360 MiB, 2 CPU cores, Ubuntu 24.04.
-- No benchmark ran: Drive mount stopped at the approval link. Other rates are ESTIMATE (`hardware.md`).
-
-## Engines per accelerator
-
-| Accelerator | Engine | Status |
+| Accelerator | Engine & Pin | Status |
 | :--- | :--- | :--- |
-| G4 | llama.cpp CUDA build with a GGUF. For Flint, `RecursiveSI/flint-nvfp4-gguf` is the only route its model card documents (tested on RTX PRO 6000 Blackwell). | VERIFIED for Flint only |
-| T4, L4, A100, H100 | llama.cpp CUDA build with a GGUF | UNVERIFIED, check on the first run |
-| TPU v5e, v6e | none chosen yet | UNVERIFIED |
+| **TPU v5e-1** | `vllm-tpu==0.32.0` + `tpu-inference==0.32.0` (`torch==2.10.0+cpu`, Python 3.12 venv in `/dev/shm`) | **VERIFIED** (`Qwen/Qwen3-4B` bf16 at **84.92–88.58 tok/s** decode, 1,653.4 tok/s B=32; see [`TPU-v5e/RECIPE.md`](TPU-v5e/RECIPE.md)) |
+| **L4, T4, A100, G4** | Prebuilt `llama.cpp` `b11954` CUDA 13.4 binary (`llama-b11954-bin-ubuntu-cuda-13.4-x64.tar.gz`) | **PINNED** (CUDA 12.8 binary failed `/health` against Colab driver 580.82.07 / CUDA 13.0; never compile on Colab) |
+| **G4 (Flint NVFP4)** | `llama.cpp` CUDA build with `RecursiveSI/flint-nvfp4-gguf` or `avgrocketman/flint-GGUF` | **UNVERIFIED on Colab** (documented on model card) |
 
-Also VERIFIED for Flint: `RecursiveSI/flint-int4` is MLX (Apple only), and SGLang needs at least 141 GB. Flint support landed in llama.cpp on 2026-10-21 (PR 30928).
+## Runbooks
 
-## Bench a new model (runbook)
+- **TPU v5e-1 (`vLLM` / `tpu-inference`):** Follow [`TPU-v5e/FAST-COLDSTART.md`](TPU-v5e/FAST-COLDSTART.md) and [`TPU-v5e/RECIPE.md`](TPU-v5e/RECIPE.md).
+- **GPU (`llama.cpp` GGUF):**
+  1. Preflight (0 CU): check `colab --auth=oauth2 sessions` (empty) and `usage` (record starting CU). Get Sahil's go.
+  2. Provision: `colab --auth=oauth2 new -s bench --gpu <GPU>`. Confirm GPU, driver, VRAM (`nvidia-smi`), and `/dev/shm` (`df -h /dev/shm`).
+  3. Pull sharded GGUF into `/dev/shm` via `snapshot_download(..., max_workers=12)` and unpack prebuilt `llama-b11954-bin-ubuntu-cuda-13.4-x64.tar.gz`.
+  4. Run `llama-bench -m /dev/shm/<file> -ngl 99 -p 512 -n 128 -r 3 -o md` plus a 1K-in / 256-out generation check; verify `nvidia-smi` VRAM delta and `offloaded N/N layers`.
+  5. Stop runtime (`colab --auth=oauth2 stop -s bench`), confirm `sessions` is empty, record ending `usage` CU, write `RESULTS.md`, and update [`INDEX.md`](INDEX.md).
 
-1. GCS URI from WEIGHTS-LOADING.md, note size, no HF re-download.
-2. Check that the model fits the GPU: file size plus KV cache under the usable VRAM in `hardware.md`. Pick the cheapest GPU that fits.
-3. Preflight (free): `colab version`, `colab --auth=oauth2 whoami`, `sessions` (must be empty), `usage` (balance and rate). Get Sahil's go.
-4. `colab --auth=oauth2 new -s bench --gpu <GPU>` (add `--high-mem` for ~30 GB and ~75 GB). Time it. Run `nvidia-smi` through `exec` and confirm the GPU, driver and CUDA.
-5. Do not drivemount on a bench VM.
-6. `gcloud storage cp` into `/tmp` with `GCP_SA_B64` and `GCS_MODEL_URI`, time it.
-7. Install the engine and note the exact version/build. For llama.cpp use a build that matches the driver's CUDA, and record the install time. Do not build from source if a prebuilt binary or wheel works.
-8. `llama-bench -m /tmp/<file> -ngl 99 -p 512 -n 128 -r 3 -o md` gives pp512 and tg128 with stddev. Then one real generation of about 350 tokens from a prompt of about 1K tokens through `llama-server` or `llama-cli`; check the output is coherent and quote a short sample. (Flags UNVERIFIED on Colab until the first entry proves them; correct them in the entry.) Also run the WEIGHTS-LOADING.md health checks (nvidia-smi VRAM delta, llama.cpp `offloaded N/N layers`, periodic tok/s).
-9. Run `usage` for balance and rate, then stop the runtime and verify `sessions` is empty. Compute CU used = balance before minus balance after.
-10. Write the entry from `_TEMPLATE.md`, append the `INDEX.md` row, grep for `@`, `key`, `token`, then commit and push to `main`.
-
-CU per 100K tokens = (100000 / tg_tok_s) / 3600 x CU_per_hr.
-
-## Failures and gotchas
-
-- `exec` default timeout is 30 s. Expiry detaches the laptop but does not kill guest processes.
-- Google AI Pro has no background execution: an idle or detached runtime is reaped in about 10 to 15 minutes. Keep `exec` attached and print a line every 20 s on long steps.
-- Per-task path skips drivemount; FUSE mmap (Drive/gcsfuse) is slow, always `/tmp`. Colab disk was 194 GB free on the T4 runtime (MEASURED 2026-10-27).
-- A VM that is not stopped keeps burning CU. `runtime.unassign()` inside the guest also releases it; still run `colab stop` and check `sessions`.
-- 0.7.2 has a broken `exec` and 0.7.3 was yanked (`ops.md`); use 0.7.5.
+$$\text{CU per 100K output tokens} = \frac{100{,}000}{\text{tg\_tok\_s} \times 3600} \times \text{CU\_per\_hr}$$

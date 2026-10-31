@@ -37,16 +37,17 @@ def main():
         time.sleep(5)
 
         print("=== Checking SSH connectivity ===", flush=True)
+        ssh_key = os.path.expanduser("~/.ssh/colab_ed25519")
         ssh_cmd = [
-            "ssh", "-i", "/home/sahil/.ssh/colab_ed25519",
-            "-o", f"ProxyCommand=colab --auth=oauth2 ssh --proxy-mode -s {sess} -i /home/sahil/.ssh/colab_ed25519",
+            "ssh", "-i", ssh_key,
+            "-o", f"ProxyCommand=colab --auth=oauth2 ssh --proxy-mode -s {sess} -i {ssh_key}",
             "-o", "StrictHostKeyChecking=no", "root@colab", "echo SSH_CONNECTED && uptime"
         ]
         r_ssh = run_cmd(ssh_cmd, capture=True)
         print("SSH_TEST_OUTPUT:\n" + r_ssh.stdout.strip(), flush=True)
 
         print("=== Uploading scripts & auth token ===", flush=True)
-        token_p = "/home/sahil/.config/colab-cli/hf_token"
+        token_p = os.path.expanduser("~/.config/colab-cli/hf_token")
         if os.path.exists(token_p):
             run_cmd(["colab", "--auth=oauth2", "upload", "-s", sess, token_p, "/content/hf_token"])
         run_cmd(["colab", "--auth=oauth2", "upload", "-s", sess, "benchmarks/TPU-v5e/tpu_engine_subrunner.py", "/content/tpu_engine_subrunner.py"])

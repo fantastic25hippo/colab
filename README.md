@@ -1,36 +1,33 @@
 # Colab Inference Worker
 
-Sahil's notes for running open-source models on Google Colab GPUs/TPUs (git repository: [`fantastic25hippo/colab`](https://github.com/fantastic25hippo/colab)), billed against a **Google AI Pro 200 CU/month** pool.
+Sahil's notes and measured runbooks for running open-source models on Google Colab GPUs and TPUs (git repository: [`fantastic25hippo/colab`](https://github.com/fantastic25hippo/colab)), billed against a **Google AI Pro (~400 CU observed)** compute-unit pool.
 
 ---
 
 ## Current Focus
 
-- **Speed.** The only goal right now is the fastest single-stream decode for coding work.
-- **Model by model.** Models are evaluated one at a time (fit, precision, speed ceiling, then a real measurement), not by picking one GPU plan up front.
-- **Starting with Flint.** Per the newest research (2026-10-24), **Flint** (Recursive; 39.8B MoE, ~2.5B active, Apache 2.0, released 2026-10-21) is the speed pick:
-  - [`coding-task-speed-single-stream-2026-10-24.md`](research/2026_model_research/coding-task-speed-single-stream-2026-10-24.md): on A100-40GB, Flint (W4A16 Marlin) is the "single-stream speed champion" at ~810 tok/s roofline, ~0.90 s for a 1k-in / 350-code completion.
-  - [`throughput-tokens-per-second-estimates-2026-10-24.md`](research/2026_model_research/throughput-tokens-per-second-estimates-2026-10-24.md): the same row notes the raw bandwidth math (~815 tok/s) versus a calibrated ~165 tok/s raw decode (~260 tok/s with speculation), and recommends an FP16/BF16 KV cache for Flint.
-  - **Flint on TPU v6e**: using the released INT4 checkpoint (`RecursiveSI/flint-int4`) with bf16 activations and an int8 KV cache, and the open items still to check (INT4 scheme, KV cache size, max context).
-- **Nothing has been run on Colab yet.** All speeds above are research estimates, not measurements.
-
-The earlier plan (Qwen3.8 Flash-Next NVFP4 on G4 with SGLang, its abliterated fallback, runbooks, guards and cost model) was removed on 2026-10-27 because the newer research supersedes it. It is still in git history; the last commit that has it is `a65bded`.
+- **Fast TPU v5e-1 & L4 Cold Starts + Single-Stream Coding Speed.**
+  - **TPU v5e-1 (`Qwen/Qwen3-4B` bf16, `vllm-tpu==0.32.0`) [MEASURED]:** **84.92–88.58 tok/s** single-stream decode (1,653.4 tok/s at Batch 32). Fast cold-start pipeline (`mount -o remount,exec /dev/shm`, prebuilt CPU-torch venv, parallel sharded HF pull to `/dev/shm`, `TPU_SKIP_MDS_QUERY=1`, `VLLM_ENABLE_V1_MULTIPROCESSING=0`, and `jax.clear_caches` loader patch) cuts environment + weight prep from 91.21 s to **19.85 s** and imports from 48 s to **5.91 s**. See [`benchmarks/TPU-v5e/RECIPE.md`](benchmarks/TPU-v5e/RECIPE.md) and [`benchmarks/TPU-v5e/FAST-COLDSTART.md`](benchmarks/TPU-v5e/FAST-COLDSTART.md).
+  - **L4 Sharded Loading (`LFM2.5-24B-A2B-Q4`) [MEASURED]:** 16 shards (14.88 GB) pulled from public Hugging Face Hub into `/dev/shm` in **16.60 s (896 MB/s)**. Decode benchmark pending `llama-b11954` CUDA 13.4 binary verification. See [`docs/lfm-l4.md`](docs/lfm-l4.md) and [`benchmarks/HF-transfer/L4/SWEEP.md`](benchmarks/HF-transfer/L4/SWEEP.md).
+  - **Flint (39.8B MoE, ~2.5B active) [ESTIMATE]:** Deposited in `avgrocketman/flint-GGUF` (25.1 GB `UD-Q4_K_XL`), unbenchmarked on Colab GPU.
 
 ---
 
-## What Is Here (newest first)
+## Repository Map (Newest First)
 
 | Path | What it is | Date |
 | :--- | :--- | :--- |
-| [`docs/lfm-l4.md`](docs/lfm-l4.md) | **LFM2.5-24B-A2B on L4.** Measured download sweeps (16 shards into /dev/shm at 896 MB/s), failure analysis, and runbook. | 2026-10-28 |
-| [`docs/WEIGHTS-LOADING.md`](docs/WEIGHTS-LOADING.md) | **Weights onto a fresh VM.** Hugging Face shards into /dev/shm, no Drive approval, no bucket, GPU health check. | 2026-10-28 |
-| [`benchmarks/README.md`](benchmarks/README.md) | **Benchmarks.** Entry format, runbook and rules for benching a model on Colab with no trial and error; results go in `benchmarks/<Model>/<GPU>/` and [`benchmarks/INDEX.md`](benchmarks/INDEX.md). | 2026-10-27 |
-| [`GPU and TPU Speed Optimization.md`](GPU%20and%20TPU%20Speed%20Optimization.md) | Audit and corrections of the per-accelerator precision documents, with a best-precision table for each accelerator. | 2026-10-24 |
-| [`research/2026_model_research/`](research/2026_model_research/README.md) | **Current source of truth for model speed and fit.** May to Oct 2026 models across all 7 Colab accelerators. | 2026-10-24 |
-| [`research/precision_format/`](research/precision_format/) | One precision-format note per accelerator (L4, A100, G4, T4, TPU v5e, TPU v6e). Corrected by the Speed Optimization document above. | 2026-10-24 to 10-27 |
-| [`NVFP4 Versus FP4 Differences Explained.md`](NVFP4%20Versus%20FP4%20Differences%20Explained.md) | Chat notes on NVFP4 vs FP4. The first part is general; the later parts discuss Qwen3.8 Flash-Next checkpoints and are no longer the focus. | 2026-10-27 (added) |
-| [`ops.md`](ops.md) | Model-independent Colab operations: account, Colab CLI, Drive mount, tunnel and API key, heartbeat, quota. | updated 2026-10-28 |
-| [`hardware.md`](hardware.md) | Google Colab AI Pro runtime hardware specifications and comparison (T4, L4, A100, G4, H100, TPU v5e/v6e). | 2026-10-20 |
+| [`research/00-INDEX.md`](research/00-INDEX.md) | **Consolidated Research Master Index (`00`–`11`).** Hardware, storage, HF Xet, L4 loading, Colab CLI, agent workflows, TPU v5e runtime/quantization/cold-start, LFM2.5, and conflict verification. | 2026-10-31 |
+| [`benchmarks/TPU-v5e/FAST-COLDSTART.md`](benchmarks/TPU-v5e/FAST-COLDSTART.md) | **TPU v5e-1 Fast Cold-Start Runbook.** CPU-torch `/dev/shm` venv, static topology vars, in-process EngineCore, `jax.clear_caches` patch, and measured `tpu-final/` results. | 2026-10-29 |
+| [`benchmarks/TPU-v5e/RECIPE.md`](benchmarks/TPU-v5e/RECIPE.md) | **Universal TPU v5e-1 Serving Recipe.** HBM memory budget formula, persistent XLA cache lifecycle, batching scaling (B=1 to 32), and context limits. | 2026-10-29 |
+| [`benchmarks/INDEX.md`](benchmarks/INDEX.md) | **Master Benchmark Index.** All measured TPU v5e, L4, A100, G4, T4, and CPU runs with CU/hr and CU spent. | 2026-10-29 |
+| [`docs/lfm-l4.md`](docs/lfm-l4.md) | **LFM2.5-24B-A2B on L4.** Sharded download sweeps into `/dev/shm`, failure analysis, and CUDA 13.4 resume recipe. | 2026-10-28 |
+| [`docs/WEIGHTS-LOADING.md`](docs/WEIGHTS-LOADING.md) | **Weights onto a Fresh VM.** Sharded HF pulls into `/dev/shm`, `/dev/shm` capacity table across tiers, and GPU/TPU health checks. | 2026-10-28 |
+| [`gguf/README.md`](gguf/README.md) | **GGUF Inventory.** Deposited `LFM2.5-24B-A2B` and `Flint` GGUF artifacts on Hugging Face Hub. | 2026-10-28 |
+| [`ops.md`](ops.md) | **Colab Operations.** Account, `google-colab-cli==0.7.5`, non-interactive HF `/dev/shm` loading, heartbeat, and CU quota discipline. | 2026-10-28 |
+| [`hardware.md`](hardware.md) | **Hardware Specifications.** Verified Colab AI Pro specs and measured CU/hr burn rates (T4, L4, A100, G4, H100, TPU v5e/v6e). | 2026-10-29 |
+| [`docs/OPTMEM.md`](docs/OPTMEM.md) & [`OPTMEM-SEED.md`](OPTMEM-SEED.md) | **OptMem Memory Workflow.** Cross-session CLI memory rules and seed facts. | 2026-10-27 |
+| [`research/2026_model_research/`](research/2026_model_research/README.md) & [`research/precision_format/`](research/precision_format/) | **Pre-Benchmark Estimates.** Early model speed/fit dossiers and per-accelerator precision notes (superseded where measured benchmarks exist). | 2026-10-24 |
 
-> [!NOTE]
-> Where research notes disagree, prefer the newer date. The 2026-10-24 dossier in `research/2026_model_research/` is the newest.
+> [!IMPORTANT]
+> Measured numbers in [`benchmarks/`](benchmarks/INDEX.md) always override estimates in [`research/`](research/00-INDEX.md). Spend 0 CU without Sahil's explicit approval, and always stop runtimes immediately after testing.

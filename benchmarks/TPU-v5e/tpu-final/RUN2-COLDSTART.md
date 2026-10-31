@@ -36,6 +36,7 @@ Timed cold start from bare VM to first token using `venv312_cpu.tar.zst` and Qwe
 - **30K Long-Context Evaluation (25,706 tokens)**:
   - **Prefill Time**: **0.09 s** (90 ms via Chunked Prefill `max_num_batched_tokens=8192`).
   - **Decode Throughput**: **10.20 tok/s** (3.13 s total wall time).
+  - *Caveat*: Both the 0.09 s prefill and 10.20 tok/s decode at 25.7K context are flagged as suspicious in [`../FAST-COLDSTART.md`](../FAST-COLDSTART.md#L98-L103) (likely asynchronous dispatch/prefix-cache timing and an uncompiled long-context bucket, compared to **69.83 tok/s** measured at 16K context in [`../tpu-characterization/RESULTS.md`](../tpu-characterization/RESULTS.md)).
 - **HBM Memory Utilization**:
   - In Use: **14.274 GiB** (90.6% of 15.748 GiB driver limit).
   - Peak In Use: **14.376 GiB** (91.3% of limit; zero OOM, 1.37 GiB headroom).
