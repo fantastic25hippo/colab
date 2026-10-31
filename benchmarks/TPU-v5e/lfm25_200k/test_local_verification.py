@@ -86,10 +86,51 @@ def test_budget_and_k8v4_kernel():
     assert out.shape == (1, 32, 64), f"Bad K8V4 out shape: {out.shape}"
     print(f"PASS (Total HBM at 200K = {total_gib:.2f} GiB < 14.49 GiB ceiling)")
 
+def test_sys_modules_hook_and_sd_layout():
+    print("[TEST 5] Verifying sys.modules padding hook and SD conv state...", end=" ")
+    import types
+    from tpu_v5e_patches import patch_sys_modules, sd_causal_conv
+    def ladder(*a, **k):
+        return [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+    utils, comp = types.ModuleType("tpu_inference.runner.utils"), types.ModuleType("tpu_inference.runner.compilation_manager")
+    utils.get_token_paddings = comp.get_token_paddings = ladder
+    wu = types.ModuleType("tpu_inference.models.jax.utils.weight_utils")
+    class Jax:
+        def clear_caches(self): raise RuntimeError("cleared")
+    wu.jax = Jax()
+    class KVCacheManager:
+        def get_kv_cache_spec(self): return {"attn": 1}
+    km = types.ModuleType("tpu_inference.runner.kv_cache_manager")
+    km.KVCacheManager = KVCacheManager
+    names = (utils.__name__, comp.__name__, wu.__name__, km.__name__)
+    for mod in (utils, comp, wu, km): sys.modules[mod.__name__] = mod
+    try:
+        patch_sys_modules()
+        assert utils.get_token_paddings() == [16, 8192]
+        assert comp.get_token_paddings() == [16, 8192]
+        try:
+            wu.jax.clear_caches(); raise AssertionError("clear_caches was no-op'd")
+        except RuntimeError: pass
+        assert int(torch.clamp(torch.tensor([-1]), min=0)) == 0
+        assert KVCacheManager().get_kv_cache_spec() == {"attn": 1}
+    finally:
+        for n in names: sys.modules.pop(n, None)
+    D, state = 4, torch.tensor([[1., 2., 3., 4.], [5., 6., 7., 8.]])
+    bx = torch.tensor([[9., 10., 11., 12.], [13., 14., 15., 16.], [17., 18., 19., 20.]])
+    w = torch.arange(D * 3, dtype=torch.float32).reshape(D, 3)
+    acc, x_ext = sd_causal_conv(bx, w, None, state)
+    assert acc.shape == (3, D)
+    manual = state[0] * w[:, 0] + state[1] * w[:, 1] + bx[0] * w[:, 2]
+    assert torch.allclose(acc[0], manual)
+    assert torch.equal(x_ext.index_select(0, torch.tensor(0) + torch.arange(2)), state)
+    assert torch.equal(x_ext.index_select(0, torch.tensor(1) + torch.arange(2)), torch.stack([state[1], bx[0]]))
+    print("PASS")
+
 if __name__ == "__main__":
     t0 = time.time()
     test_trap2_split_plane_q4_0()
     test_trap1_config_regexes()
     test_trap3_short_conv_and_patches()
     test_budget_and_k8v4_kernel()
-    print(f"All 4 verification test suites passed in {time.time() - t0:.2f}s!")
+    test_sys_modules_hook_and_sd_layout()
+    print(f"All 5 verification test suites passed in {time.time() - t0:.2f}s!")

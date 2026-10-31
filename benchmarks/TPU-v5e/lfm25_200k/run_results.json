@@ -1,0 +1,47 @@
+{
+  "t_remount_s": 0.05,
+  "venv_and_cache_prep": {
+    "dl_s": 9.59,
+    "unpack_s": 6.42,
+    "total_s": 16.0
+  },
+  "weights_dl_s": 11.6,
+  "in_vm_cold_start_to_first_token_s": 310.91,
+  "total_cold_start_to_first_token_s": 320.99,
+  "engine": {
+    "init_s": 269.29,
+    "first_token_ts": 1793462685.1936023,
+    "ttft_short_s": 0.1528,
+    "decode_tok_s": 170.26,
+    "sample_output": " The fundamental principles of astphysics and stellar evolution are the fundamental principles of astphysics and stellar evolution. The fundamental principles of astphysics and stellar evolution are t",
+    "context_evals": {
+      "32768": {
+        "prompt_len": 32704,
+        "ttft_s": 2.342,
+        "decode_tok_s": 23.87,
+        "hbm": {
+          "in_use_gib": 14.738,
+          "peak_gib": 14.821,
+          "limit_gib": 15.748
+        }
+      },
+      "200000": {
+        "prompt_len": 199936,
+        "ttft_s": 32.5779,
+        "decode_tok_s": 1.93,
+        "hbm": {
+          "in_use_gib": 14.738,
+          "peak_gib": 14.821,
+          "limit_gib": 15.748
+        }
+      }
+    },
+    "hbm_stats": {
+      "in_use_gib": 14.738,
+      "peak_gib": 14.821,
+      "limit_gib": 15.748
+    },
+    "tar_cache_s": 0.1
+  },
+  "vm_provision_s": 4.77
+}

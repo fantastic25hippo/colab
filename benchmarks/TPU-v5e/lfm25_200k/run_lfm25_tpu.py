@@ -1,7 +1,8 @@
 import base64, json, os, subprocess, sys, time
 
 def run_cmd(cmd, capture=True):
-    print(f"RUN: {' '.join(cmd)}", flush=True)
+    shown = ["HF_TOKEN=<redacted>" if str(c).startswith("HF_TOKEN=") else c for c in cmd]
+    print(f"RUN: {' '.join(shown)}", flush=True)
     res = subprocess.run(cmd, capture_output=capture, text=True)
     if res.returncode != 0 and capture:
         print(f"ERR ({res.returncode}):\n{res.stderr}\n{res.stdout}", flush=True)

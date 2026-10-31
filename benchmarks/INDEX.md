@@ -4,6 +4,7 @@ One row per entry, newest first. Format and rules: [`README.md`](README.md). Spe
 
 | Date (IST) | Model / Task | Quant | Accelerator | Engine + build | Prefill (pp512 / TTFT) | Decode (tok/s) | CU/hr | CU used | Entry |
 | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| 2026-10-31 | LiquidAI/LFM2.5-24B-A2B (200K, B=1) | W8A8+W4A16 | TPU-v5e | vllm-tpu 0.32.0 (`310.9s` in-VM / `321.0s` global) | 0.153s TTFT (32.58s @200K) | 170.26 (1.93 @200K, prefill in wall) | 3.09 | 0.22 | [entry](TPU-v5e/lfm25_200k/RESULTS.md) |
 | 2026-10-31 | Qwen/Qwen3-4B (32K floor cold start, Run 5) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`73.1s` in-VM / `81.2s` global, `[16,8192]` buckets, 0 apt/uploads) | 21.4 ms TTFT (2.18s @22.3K) | 86.99 (58.31 @22.3K) | 2.92 | 0.04 | [entry](TPU-v5e/tpu-final/RUN5-FLOOR-COLDSTART.md) |
 | 2026-10-31 | Qwen/Qwen3-4B (32K pruned cold start, Run 4) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`90.8s` in-VM / `103.9s` global, `[16,512,8192]` buckets) | 2.19s @22.3K | 86.7 (58.35 @22.3K) | 2.92 | 0.08 | [entry](TPU-v5e/tpu-final/RUN4-PRUNED-COLDSTART.md) |
 | 2026-10-31 | Qwen/Qwen3-4B (32K warm cold start, Run 3) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`131.2s` in-VM / `145.4s` global, 0 compiles) | 23.0 ms TTFT (2.18s @22.3K) | 86.99 (58.13 @22.3K) | 2.92 | 0.13 | [entry](TPU-v5e/tpu-final/RUN3-WARM-COLDSTART.md) |
