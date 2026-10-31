@@ -4,6 +4,9 @@ One row per entry, newest first. Format and rules: [`README.md`](README.md). Spe
 
 | Date (IST) | Model / Task | Quant | Accelerator | Engine + build | Prefill (pp512 / TTFT) | Decode (tok/s) | CU/hr | CU used | Entry |
 | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| 2026-10-31 | Qwen/Qwen3-4B (32K floor cold start, Run 5) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`73.1s` in-VM / `81.2s` global, `[16,8192]` buckets, 0 apt/uploads) | 21.4 ms TTFT (2.18s @22.3K) | 86.99 (58.31 @22.3K) | 2.92 | 0.04 | [entry](TPU-v5e/tpu-final/RUN5-FLOOR-COLDSTART.md) |
+| 2026-10-31 | Qwen/Qwen3-4B (32K pruned cold start, Run 4) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`90.8s` in-VM / `103.9s` global, `[16,512,8192]` buckets) | 2.19s @22.3K | 86.7 (58.35 @22.3K) | 2.92 | 0.08 | [entry](TPU-v5e/tpu-final/RUN4-PRUNED-COLDSTART.md) |
+| 2026-10-31 | Qwen/Qwen3-4B (32K warm cold start, Run 3) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`131.2s` in-VM / `145.4s` global, 0 compiles) | 23.0 ms TTFT (2.18s @22.3K) | 86.99 (58.13 @22.3K) | 2.92 | 0.13 | [entry](TPU-v5e/tpu-final/RUN3-WARM-COLDSTART.md) |
 | 2026-10-29 | Qwen/Qwen3-4B (32K cold start, Run 2) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`venv312_cpu` in `/dev/shm`) | 75.5 ms TTFT | 88.58 | 2.92 | 0.22 | [entry](TPU-v5e/tpu-final/RUN2-COLDSTART.md) |
 | 2026-10-29 | Fast Venv Build (`venv312_cpu.tar.zst`, Run 1) | n/a | TPU-v5e | vllm-tpu 0.32.0 + `torch 2.10.0+cpu` | n/a | n/a | 2.92 | 0.13 | [entry](TPU-v5e/tpu-final/RUN1-VENV.md) |
 | 2026-10-29 | Qwen/Qwen3-4B (final confirmation, B=1..32) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (warm 17K cache) | 16.3 ms TTFT | 84.92 (1,653.4 B=32) | 2.92 | 0.52 | [entry](TPU-v5e/tpu-final/RESULTS.md) |

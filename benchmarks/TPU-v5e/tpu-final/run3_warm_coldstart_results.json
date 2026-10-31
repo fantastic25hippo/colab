@@ -1,0 +1,52 @@
+{
+  "t_remount_and_thp_s": 0.06,
+  "thp_status": "err:[Errno 30] Read-only file system: '/sys/kernel/mm/transparent_hugepage/defrag'",
+  "venv_and_cache_prep": {
+    "dl_s": 3.06,
+    "unpack_s": 7.83,
+    "total_s": 10.89
+  },
+  "weights_dl_s": 5.89,
+  "in_vm_cold_start_to_first_token_s": 131.2,
+  "total_cold_start_to_first_token_s": 145.44,
+  "engine": {
+    "import_and_tpu_init_s": 19.3,
+    "wait_for_weights_s": 0.0,
+    "engine_init_s": 88.95,
+    "cache_entries_before": 109,
+    "cache_entries_after": 109,
+    "new_compiles": 0,
+    "ttft_short_s": 0.023,
+    "first_token_ts": 1793439507.6415627,
+    "decode_runs": [
+      {
+        "tokens": 256,
+        "wall_s": 2.9539,
+        "tok_s": 87.01
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.956,
+        "tok_s": 86.94
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.953,
+        "tok_s": 87.03
+      }
+    ],
+    "mean_decode_tok_s": 86.99,
+    "ctx_long": {
+      "tokens": 22286,
+      "prefill_s": 2.18,
+      "decode_tok_s": 58.13,
+      "wall_s": 2.71
+    },
+    "hbm": {
+      "in_use_gib": 14.273,
+      "peak_gib": 14.374,
+      "limit_gib": 15.748
+    }
+  },
+  "vm_provision_s": 4.9
+}

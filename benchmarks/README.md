@@ -34,9 +34,23 @@ Measured results for running models on Colab GPUs and TPUs, written so an agent 
 
 | Accelerator | Engine & Pin | Status |
 | :--- | :--- | :--- |
-| **TPU v5e-1** | `vllm-tpu==0.32.0` + `tpu-inference==0.32.0` (`torch==2.10.0+cpu`, Python 3.12 venv in `/dev/shm`) | **VERIFIED** (`Qwen/Qwen3-4B` bf16 at **84.92–88.58 tok/s** decode, 1,653.4 tok/s B=32; see [`TPU-v5e/RECIPE.md`](TPU-v5e/RECIPE.md)) |
+| **TPU v5e-1** | `vllm-tpu==0.32.0` + `tpu-inference==0.32.0` (`torch==2.10.0+cpu`, Python 3.12 venv in `/dev/shm`) | **VERIFIED** (`73.08 s` in-VM / `81.22 s` global cold start, `21.4 ms` TTFT, **86.99 tok/s** decode, `0.04 CU`; see [`TPU-v5e/FAST-COLDSTART.md`](TPU-v5e/FAST-COLDSTART.md)) |
 | **L4, T4, A100, G4** | Prebuilt `llama.cpp` `b11954` CUDA 13.4 binary (`llama-b11954-bin-ubuntu-cuda-13.4-x64.tar.gz`) | **PINNED** (CUDA 12.8 binary failed `/health` against Colab driver 580.82.07 / CUDA 13.0; never compile on Colab) |
 | **G4 (Flint NVFP4)** | `llama.cpp` CUDA build with `RecursiveSI/flint-nvfp4-gguf` or `avgrocketman/flint-GGUF` | **UNVERIFIED on Colab** (documented on model card) |
+
+## Subagent Execution & Live SSH Monitoring Protocol
+
+When running Colab benchmarks or cold-start tests, the main agent prepares the scripts and delegates live execution + monitoring to a **`flash` subagent** (`invoke_subagent` with `Model="flash"`, reusing the same subagent via `send_message` across iterative runs):
+
+1. **Preflight (0 CU):** Confirm `colab --auth=oauth2 sessions` is empty and record starting `colab --auth=oauth2 usage`.
+2. **Background Driver Launch:** The subagent launches the host runner in the background (e.g. `python3 -u benchmarks/TPU-v5e/run_coldstart.py > /tmp/run_coldstart.log 2>&1`).
+3. **Live SSH Inspection:** Once `colab new -s <session>` provisions the VM, the subagent connects via SSH proxy mode without disturbing the active `colab exec` stream:
+   ```bash
+   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+     -o ProxyCommand="colab --auth=oauth2 ssh -s <session> --proxy-mode" \
+     root@colab-<session> "tail -n 30 /content/build.log; df -h /dev/shm"
+   ```
+4. **Teardown & Verification:** When the driver finishes, its `finally:` block runs `colab --auth=oauth2 stop -s <session>`. The subagent verifies `colab --auth=oauth2 sessions` is empty (`0` active sessions), records the final `colab --auth=oauth2 usage` CU delta, and returns the structured JSON metrics to the main agent.
 
 ## Runbooks
 

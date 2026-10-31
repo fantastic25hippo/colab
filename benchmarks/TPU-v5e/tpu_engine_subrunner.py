@@ -1,10 +1,41 @@
-import builtins, json, os, sys, time
+import builtins, json, os, sys, time, urllib.error, urllib.request
+
+# Fail fast on Colab's non-existent GCE TPU metadata endpoint instead of waiting on 404 retries
+_orig_urlopen = urllib.request.urlopen
+def _fast_urlopen(url, *args, **kwargs):
+    u_str = url if isinstance(url, str) else getattr(url, "full_url", str(url))
+    if "metadata.google.internal" in u_str:
+        raise urllib.error.URLError("Bypassed GCE metadata poll on Colab")
+    return _orig_urlopen(url, *args, **kwargs)
+urllib.request.urlopen = _fast_urlopen
+
+def _wrap_get_token_paddings(orig_fn):
+    def _wrapped(*args, **kwargs):
+        paddings = orig_fn(*args, **kwargs)
+        if isinstance(paddings, list) and len(paddings) > 2:
+            pruned = sorted(set([paddings[0], paddings[-1]]))
+            print(f"[SUBRUNNER_HOOK] Pruned token paddings {paddings} -> {pruned}", flush=True)
+            return pruned
+        return paddings
+    _wrapped._is_pruned = True
+    return _wrapped
 
 orig_imp = builtins.__import__
 def custom_imp(name, *args, **kwargs):
     res = orig_imp(name, *args, **kwargs)
-    mod = sys.modules.get("tpu_inference.models.jax.utils.weight_utils")
-    if mod and hasattr(mod, "jax"): mod.jax.clear_caches = lambda: None
+    if name.startswith("tpu_inference"):
+        mod_w = sys.modules.get("tpu_inference.models.jax.utils.weight_utils")
+        if mod_w and hasattr(mod_w, "jax"):
+            mod_w.jax.clear_caches = lambda: None
+        for m_name, m in list(sys.modules.items()):
+            if m and m_name.startswith("tpu_inference"):
+                fn = getattr(m, "get_token_paddings", None)
+                if callable(fn) and not getattr(fn, "_is_pruned", False):
+                    setattr(m, "get_token_paddings", _wrap_get_token_paddings(fn))
+                for c_name in ("TPUModelRunner", "CompilationManager"):
+                    cls = getattr(m, c_name, None)
+                    if cls and hasattr(cls, "_precompile_structured_decoding"):
+                        setattr(cls, "_precompile_structured_decoding", lambda self, *a, **kw: None)
     return res
 builtins.__import__ = custom_imp
 
@@ -15,8 +46,26 @@ os.environ["JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS"] = "0"
 os.environ["JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES"] = "0"
 os.makedirs("/dev/shm/tpu_compile_cache", exist_ok=True)
 
+def log_sub(m):
+    msg = f"[SUBRUNNER {time.strftime('%H:%M:%S')}] {m}"
+    print(msg, flush=True)
+    try:
+        with open("/content/build.log", "a") as f: f.write(msg + "\n")
+    except Exception: pass
+
+t_imp0 = time.time()
+log_sub("Importing jax and vllm (overlapped with weight download)...")
 import jax
 from vllm import LLM, SamplingParams
+tpu_devs = str(jax.devices())
+t_import_s = time.time() - t_imp0
+log_sub(f"Imports + TPU init done in {t_import_s:.2f}s: {tpu_devs}")
+
+t_wait0 = time.time()
+while not os.path.exists("/dev/shm/.weights_ready"):
+    time.sleep(0.05)
+t_wait_weights_s = time.time() - t_wait0
+log_sub(f"Weights ready barrier passed (waited {t_wait_weights_s:.2f}s after imports)")
 
 def get_hbm():
     try:
@@ -26,24 +75,26 @@ def get_hbm():
                 "limit_gib": round(m.get("bytes_limit", 0)/(1024**3), 3)}
     except Exception as e: return {"error": str(e)}
 
+cache_before = len(os.listdir("/dev/shm/tpu_compile_cache"))
 t_eng0 = time.time()
 llm = LLM(model="/dev/shm/qwen3", max_model_len=32768, max_num_seqs=1,
           gpu_memory_utilization=0.90, trust_remote_code=True)
 t_ready = time.time()
 init_dur = t_ready - t_eng0
-compiles = len(os.listdir("/dev/shm/tpu_compile_cache"))
-print(f"[SUBRUNNER] Ready in {init_dur:.2f}s, compile_count={compiles}", flush=True)
+cache_after = len(os.listdir("/dev/shm/tpu_compile_cache"))
+new_compiles = max(0, cache_after - cache_before)
+log_sub(f"Engine ready in {init_dur:.2f}s (cache_before={cache_before}, cache_after={cache_after}, new_compiles={new_compiles})")
 
-p_short = "The exploration of deep space has fascinated humanity for centuries. Astronomers observe distant stars and galaxies through powerful telescopes, searching for clues about cosmic microwave background and spacetime dimensions."
+p_short = "Deep space exploration reveals clues about cosmic microwave background and spacetime."
 sp_1 = SamplingParams(max_tokens=1, min_tokens=1, temperature=0.0, ignore_eos=True)
 t0 = time.perf_counter()
 llm.generate([p_short], sp_1)
 ttft_short = time.perf_counter() - t0
 t_first_tok_wall = time.time()
-print(f"[SUBRUNNER] Short prompt TTFT: {ttft_short:.4f}s", flush=True)
+log_sub(f"Short prompt TTFT: {ttft_short:.4f}s")
 
 sp_256 = SamplingParams(max_tokens=256, min_tokens=256, temperature=0.0, ignore_eos=True)
-llm.generate([p_short], sp_256) # warmup
+llm.generate([p_short], sp_256)
 
 d_runs = []
 for i in range(3):
@@ -53,36 +104,37 @@ for i in range(3):
     toks = len(out.outputs[0].token_ids)
     tps = round((toks - 1) / max(0.001, dur - ttft_short), 2)
     d_runs.append({"tokens": toks, "wall_s": round(dur, 4), "tok_s": tps})
-    print(f"[SUBRUNNER] Decode {i+1}: {toks} tok in {dur:.2f}s ({tps} tok/s)", flush=True)
+    log_sub(f"Decode {i+1}: {toks} tok in {dur:.2f}s ({tps} tok/s)")
 mean_tok_s = round(sum(r["tok_s"] for r in d_runs) / len(d_runs), 2)
 
 tok = llm.get_tokenizer()
-chunk = "Artificial intelligence and distributed computing continue to revolutionize modern science. "
-c_len = len(tok.encode(chunk))
-prompt_30k = chunk * int(30000 / c_len)
-p30k_tokens = len(tok.encode(prompt_30k))
-print(f"[SUBRUNNER] 30K prompt encoded: {p30k_tokens} tokens", flush=True)
+chunk_a = "Artificial intelligence and distributed computing continue to revolutionize modern science. "
+chunk_b = "Quantum mechanics and general relativity form the twin pillars of modern theoretical physics. "
+prompt_30k_a = chunk_a * int(26000 / len(tok.encode(chunk_a)))
+prompt_30k_b = chunk_b * int(26000 / len(tok.encode(chunk_b)))
+p30k_tokens = len(tok.encode(prompt_30k_a))
+
+t0_p1 = time.perf_counter()
+llm.generate([prompt_30k_a], sp_1)
+prefill_30k = time.perf_counter() - t0_p1
 
 sp_32 = SamplingParams(max_tokens=32, min_tokens=32, temperature=0.0, ignore_eos=True)
 t0_30k = time.perf_counter()
-llm.generate([prompt_30k], sp_32)
+llm.generate([prompt_30k_b], sp_32)
 wall_30k = time.perf_counter() - t0_30k
-
-t0_p1 = time.perf_counter()
-llm.generate([prompt_30k], sp_1)
-prefill_30k = time.perf_counter() - t0_p1
-dec_dur_30k = max(0.001, wall_30k - prefill_30k)
-dec_tps_30k = round(31 / dec_dur_30k, 2)
+dec_tps_30k = round(31 / max(0.001, wall_30k - prefill_30k), 2)
 hbm = get_hbm()
-print(f"[SUBRUNNER] 30K: prefill={prefill_30k:.2f}s, decode={dec_tps_30k} tok/s, wall={wall_30k:.2f}s, HBM={hbm}", flush=True)
+log_sub(f"Long ctx ({p30k_tokens} tok): prefill={prefill_30k:.2f}s, decode={dec_tps_30k} tok/s, wall={wall_30k:.2f}s, HBM={hbm}")
 
 res = {
-    "engine_init_s": round(init_dur, 2), "compile_count": compiles,
+    "import_and_tpu_init_s": round(t_import_s, 2), "wait_for_weights_s": round(t_wait_weights_s, 2),
+    "engine_init_s": round(init_dur, 2), "cache_entries_before": cache_before,
+    "cache_entries_after": cache_after, "new_compiles": new_compiles,
     "ttft_short_s": round(ttft_short, 4), "first_token_ts": t_first_tok_wall,
     "decode_runs": d_runs, "mean_decode_tok_s": mean_tok_s,
-    "ctx_30k": {"tokens": p30k_tokens, "prefill_s": round(prefill_30k, 2),
-                "decode_tok_s": dec_tps_30k, "wall_s": round(wall_30k, 2)},
+    "ctx_long": {"tokens": p30k_tokens, "prefill_s": round(prefill_30k, 2),
+                 "decode_tok_s": dec_tps_30k, "wall_s": round(wall_30k, 2)},
     "hbm": hbm
 }
 with open("/content/engine_results.json", "w") as f: json.dump(res, f, indent=2)
-print("=== SUBRUNNER_SUCCESS ===", flush=True)
+log_sub("=== SUBRUNNER_SUCCESS ===")

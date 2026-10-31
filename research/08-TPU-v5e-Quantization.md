@@ -70,12 +70,16 @@ Why it wins:
 - **12B on one v5e-1:** bf16 (22.4 GiB) **OOM**; W8A8 INT8 + 4-bit embeddings fits and serves **57 tok/s at batch 1, 216 tok/s at batch 4, 713 tok/s at batch 16**, GSM8K **96.44%**.
 - **12B, 16 streams, same file size:** INT8 **624 tok/s** vs FP8 **518 tok/s**, because v5e has no native FP8 MXU and must convert FP8 weights to bf16 before each multiply.
 
-## 6. KV cache on TPU: the fp8/int8 trap
+## 6. KV cache on TPU: Issue #3126 root cause and the K8V4 / INT8 MXU fix
 
-- **`--kv-cache-dtype int8` is not supported by the TPU Ragged Paged Attention (RPA) kernel.** tpu-inference only wires `fp8`, `fp8_e4m3`, `fp8_e5m2` in its configuration surface.
-- **Critical warning (Issue #3126):** `--kv-cache-dtype fp8` is accepted by the CLI and logs `INFO [cache.py:279] Using fp8 data type to store kv cache`, but on v5e/v6e in many configurations (especially torchax path, `tp_size >= num_kv_heads`, or depending on RPA kernel dispatch) it **silently allocates a bfloat16 KV cache** — zero memory savings, zero throughput change.
-- **How to verify:** compare the init log `INFO [kv_cache_utils.py:...] GPU KV cache size: X tokens` for `--kv-cache-dtype auto` vs `fp8`. If X does not roughly double, you got bf16.
-- **Conflict with 07:** the Best Practices doc claims `--kv-cache-dtype int8` gives true 8-bit compression (likely the TorchTPU custom ring path). The quantization guide says vLLM RPA does not support int8. Treat this as path-specific; verify in logs.
+- **Why `--kv-cache-dtype fp8` silently allocates `bfloat16` on v5e (Issue #3126):**
+  1. `vllm/config/cache.py:279` logs `Using fp8 data type to store kv cache` unconditionally before worker allocation.
+  2. `tpu_inference/platforms/tpu_platform.py:101` only remaps `fp8 -> fp8_e5m2` when `tpu_version >= 6` (v6e), because v5e has no native FP8 MXU/VPU instructions.
+  3. `tpu_inference/runner/kv_cache_manager.py` (`get_kv_cache_spec`) falls back to `model_config.dtype` (`bfloat16`), and `tpu_inference/kernels/ragged_paged_attention/v3/kernel.py` (`static_validate_inputs`) explicitly blocks integer KV with `if not jnp.issubdtype(kv_cache.dtype, jnp.floating): raise ValueError(...)`.
+- **The 410 MB HBM materialization trap:** Doing `k_bf16 = k_int8.to(torch.bfloat16) * k_scale` in PyTorch before SDPA at 200K (`[1, 8, 200000, 64]`) materializes **410 MB per layer** in HBM (12.2× larger than the 32 MB VMEM), inflating HBM traffic from 195 MiB to 977 MiB/layer.
+- **How to achieve true in-VMEM 8-bit / `K8V4` KV on v5e:**
+  - Patch `kv_cache_manager.py` and RPA v3 `kernel.py` (or use a custom Pallas kernel with `pltpu.PrefetchScalarGridSpec`) to stream `B_k=512` tiles (`<300 KB`) into 32 MB VMEM.
+  - Execute $Q_{\text{int8}} K_{\text{int8}}^T$ directly on the **393 TOPS INT8 MXU** (`preferred_element_type=jnp.int32`), cutting VPU conversion ops on Keys by **16×**, and absorb the per-token-head `group=64` Value scale $s^V_{t,h}$ into the online softmax probabilities (`p_scaled = p * v_scale`) before multiplying by unpacked 4-bit $V$ (`K8V4`).
 
 ## 7. Exact flags and environment variables
 

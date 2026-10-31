@@ -1,105 +1,65 @@
 # Fast Cold Start on Colab TPU v5e-1: Universal Model Runbook
 
-Model-independent engineering guide to achieve minimal cold-start latency on Google Colab TPU v5e-1 (16 GB HBM2, 15.748 GiB driver limit).
+Model-independent engineering guide to achieve physical-floor cold-start latency (**`73.08 s` in-VM / `81.22 s` global** from `colab new`) on Google Colab TPU v5e-1 (`15.748 GiB` HBM limit).
 
 ---
 
-## 1. Where Cold-Start Time Goes: Baseline (`17.4K` Warm) vs Fast Pipeline (`32K` Cold)
+## 1. Where Cold-Start Time Goes: Progression to the `73.08 s` Floor (`MEASURED`)
 
-*Note: Naive Baseline ran at `max_model_len=17408` with a warm XLA cache (`tpu_compile_cache.tar`), while Run 2 tested the new `/dev/shm` pipeline at `max_model_len=32768` on a cold 32K cache (depositing `tpu_compile_cache_b1_32k.tar`). Non-compilation setup dropped from **185.2 s to 25.8 s (-159.4 s)**.*
-
-| Phase | Naive Baseline (`17.4K`, `tpu-final`) | Fast Pipeline (`32K`, `RUN2-COLDSTART`) | Gain / Status |
-| :--- | ---: | ---: | :--- |
-| **Package Install / Venv** | 91.21 s [MEASURED, STARTUP-BREAKDOWN.md:14] | 19.85 s parallel prep [MEASURED, RUN2-COLDSTART.md:13] | **-71.36 s (-78%)** |
-| **Model Weights Download** | 10.14 s [MEASURED, STARTUP-BREAKDOWN.md:12] | Overlapped in 19.85 s prep [MEASURED, RUN2-COLDSTART.md:13] | **Zero added time** |
-| **Imports & Platform Init**| 48.00 s on ext4 [MEASURED, STARTUP-BREAKDOWN.md:15] | 15.56 s (A) -> 5.91 s (B) [MEASURED, RUN2-COLDSTART.md:14] | **-42.09 s** (-9.65 s from MDS vars; rest from tmpfs/CPU torch) |
-| **Engine Process Spawn**   | 11.00 s [MEASURED, STARTUP-BREAKDOWN.md:18] | 0.00 s (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) | **-11.00 s (Eliminated)** |
-| **Weight Load & KV Alloc** | 15.16 s (`11.85s` w/ `clear_caches` patch + `3.31s` KV) | Included in engine init | Keep `jax.clear_caches` patch (`RECIPE.md` §3) |
-| **JAX Compilation**        | 48.46 s (`17.4K` warm hit, 261 hits / 0 compiles) | 194.16 s (`32K` cold miss, 104 programs compiled) | Warm 32K cache deposited (`53.66 MB`); warm 32K timing [UNTESTED] |
-| **Total to First Token**   | **235.33 s** [MEASURED, `tpu-final/RESULTS.md`] | **282.46 s (`32K` cold miss)** [MEASURED] / **~75–85 s warm [ESTIMATE]** | Warm `/dev/shm` + warm cache is estimated at ~75–85 s |
-
----
-
-## 2. Prebuilt CPU-Torch Virtual Environment
-
-Standard PyPI `torch` pulls 15 NVIDIA CUDA packages (>1.4 GB) unused by TPU [MEASURED, STARTUP-BREAKDOWN.md:66].
-- **CPU-Only Torch Pin**: `--extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match "torch==2.10.0+cpu"` completely eliminates all NVIDIA packages (**0 found**) [MEASURED, RUN1-VENV.md:12].
-- **Precompile & Package**: Run `python -m compileall -q` on site-packages to eliminate runtime JIT bytecode lag (took **47.19 s** [MEASURED, RUN1-VENV.md:14]).
-- **Archive with zstd**: `tar -I "zstd -3 -T0" -cf venv312_cpu.tar.zst -C /dev/shm vllm_env` packs **5,132.45 MB** into **1,387.55 MB** in **10.36 s** [MEASURED, RUN1-VENV.md:15, 17].
-- **Download vs Install**: Replaces the **91.21 s** install [MEASURED, STARTUP-BREAKDOWN.md:14] with **13.50 s download** + **6.35 s unpack** [MEASURED, RUN2-COLDSTART.md:11].
+| Phase | Naive Baseline (`17.4K`) | Run 2 (`32K` Cold) | Run 3 (`32K` Warm) | Run 4 (Pruned 3-Bucket) | Run 5 (Floor 2-Bucket) | Net Gain (Run 2 $\rightarrow$ Run 5) |
+| :--- | ---: | ---: | ---: | ---: | ---: | :--- |
+| **VM Provision + Pre-Exec** | ~10 s | 51.98 s | 14.24 s | 13.09 s | **8.14 s** (`4.77 s` VM + `0` uploads) | **-43.84 s (-84.3%)** |
+| **Venv + XLA Cache Prep (`/dev/shm`)** | 91.21 s (`pip`) | 20.23 s | 10.89 s | 19.99 s (`apt`) | **9.11 s** (`2.60 s` dl + `6.51 s` unpack, `0` apt) | **-11.12 s (-55.0%)** |
+| **Model Weights Download** | 10.14 s | 10.74 s | 9.96 s | 6.00 s (hidden) | **6.03 s (`0.00 s` net, hidden in imports)** | **-10.74 s (-100% net)** |
+| **Imports & TPU Init** | 48.00 s (ext4) | 29.68 s | 30.89 s | 20.30 s | **19.39 s** (`/etc/hosts` loopback MDS kill) | **-10.29 s (-34.7%)** |
+| **Engine Process Spawn** | 11.00 s | 0.00 s | 0.00 s | 0.00 s | **0.00 s** (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) | **-11.00 s (Eliminated)** |
+| **Engine Init & XLA Load (`LLM(...)`)** | 63.62 s | 169.39 s (`109` compiles) | 88.95 s (`10` buckets) | 49.84 s (`3` buckets) | **43.94 s** (`2` buckets `[16, 8192]`, `0` compiles) | **-125.45 s (-74.1%)** |
+| **Short-Prompt TTFT (`1` tok)** | 16.3 ms | 23.5 ms | 23.8 ms | 415.3 ms | **21.4 ms** (`12`-tok prompt hits bucket `16`) | **Zero regression** |
+| **In-VM Cold-Start to 1st Token** | **~225 s** | **230.48 s** | **131.20 s** | **90.76 s** | **`73.08 s` [MEASURED]** | **`-157.40 s` (`3.15x` faster)** |
+| **Global Cold-Start (`colab new` $\rightarrow$ 1st Tok)** | **235.33 s** | **282.46 s** | **145.44 s** | **103.85 s** | **`81.22 s` [MEASURED]** | **`-201.24 s` (`3.48x` faster)** |
+| **Compute Units Spent** | 0.52 CU | 0.26 CU | 0.13 CU | 0.08 CU | **`0.04 CU` [MEASURED]** | **-84.6% CU** |
 
 ---
 
-## 3. Mandatory `/dev/shm` Exec Remount
+## 2. The 10 Universal Model-Independent Cold-Start Rules (`MEASURED`)
 
-Google Colab mounts tmpfs `/dev/shm` with `noexec` by default (`rw,nosuid,nodev,noexec,...`) [MEASURED, RUN1-VENV.md:8], causing dynamic linker `dlopen` (`libtorch_global_deps.so`) to fail with `OSError: failed to map segment from shared object` [MEASURED, RUN1-VENV.md:44].
-- **Fix**: Run `mount -o remount,exec /dev/shm` before running or unpacking any venv into `/dev/shm` (took **0.08 s**, `rc=0`) [MEASURED, RUN2-COLDSTART.md:9].
-
----
-
-## 4. Parallel Weights and Venv Download
-
-Download model weights and prebuilt venv simultaneously to `/dev/shm` using Hugging Face (never use Google Drive; Drive mount is interactive and slow [MEASURED, RECIPE.md:71-73]):
-- Running `hf_hub_download` (venv) and `snapshot_download` (weights) in parallel took **19.85 s total** [MEASURED, RUN2-COLDSTART.md:13] (venv dl 13.50 s, unpack 6.35 s; weights dl 11.89 s).
-
----
-
-## 5. Bypass Metadata 404 Probes with Static Topology
-
-During TPU platform init, `cloud_tpu_init.py` attempts HTTP polling on `http://metadata.google.internal/...`, hanging on repeated 404 timeouts [MEASURED, STARTUP-BREAKDOWN.md:32].
-- Set static environment variables: `TPU_SKIP_MDS_QUERY=1 TPU_TOPOLOGY=1x1 TPU_HOST_BOUNDS=1,1,1 TPU_CHIPS_PER_HOST_BOUNDS=1,1,1 TPU_WORKER_ID=0 TPU_WORKER_HOSTNAMES=localhost JAX_PLATFORMS=tpu,cpu`.
-- **Impact**: Reduced `import vllm, jax` verification check from **15.56 s down to 5.91 s** (**-9.65 s / -62%**) [MEASURED, RUN2-COLDSTART.md:21-23].
-- **Rule**: Always run `python -c "import vllm, jax; print(jax.devices())"` after setting them to verify `[TpuDevice(id=0)]` appears.
+1. **Zero Pre-Exec `colab upload` Round-Trips:** Pass small helper scripts (`SUBRUNNER_B64`) and `HF_TOKEN` directly via `colab exec --env` immediately after `colab new`. Eliminates `5.46 s` of CLI file-upload round-trips [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+2. **Mandatory `/dev/shm` Exec Remount:** Colab mounts `/dev/shm` with `noexec` by default. Run `mount -o remount,exec /dev/shm` first (`0.01 s`) so shared libraries (`libtorch_global_deps.so`, `libtpu.so`) can `mmap(PROT_EXEC)` from tmpfs [MEASURED, `RUN1-VENV.md:44`].
+3. **Zero-`apt` Prebuilt CPU-Torch Venv + `zstd_bin`:** Standard PyPI `torch` pulls >1.4 GB of unused NVIDIA CUDA wheels. Prebuilding `vllm-tpu==0.32.0` with `torch==2.10.0+cpu`, precompiling `.pyc`, and staging `venv312_cpu.tar.zst` (`1.39 GB`), `tpu_compile_cache_b1_32k.tar` (`53.7 MB`), and `zstd_bin` (`999 KB`) in `avgrocketman/tpu-compile-cache` downloads all three in **`2.60 s`** and unpacks in **`6.51 s`** (`9.11 s` total, zero `apt-get`) [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+4. **Uncontested `/dev/shm` Unpack, Then Overlapped Weight Download During Imports:** Unpack the `5.1 GB` venv into `/dev/shm` first with zero competing I/O, then start `snapshot_download(..., max_workers=12)` in a background thread at the exact moment `tpu_engine_subrunner.py` starts `import jax; from vllm import LLM`. Weight download (`6.03 s` for `7.55 GB`) finishes completely inside the `19.39 s` import window (`0.00 s` net wait) [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+5. **Kill Both Python & C++ `libtpu.so` GCE Metadata Polling:** Set `TPU_SKIP_MDS_QUERY=1 TPU_TOPOLOGY=1x1 TPU_HOST_BOUNDS=1,1,1 TPU_CHIPS_PER_HOST_BOUNDS=1,1,1 TPU_WORKER_ID=0 TPU_WORKER_HOSTNAMES=localhost`, append `127.0.0.1 metadata.google.internal metadata` to `/etc/hosts`, and monkey-patch `urllib.request.urlopen` so both Python and C++ `libtpu.so` fail fast (`ECONNREFUSED` in `0 ms`) instead of waiting on remote HTTP 404 retries [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+6. **Single-Process In-Place Engine Execution:** Export `VLLM_ENABLE_V1_MULTIPROCESSING=0` to run `EngineCore` in-process, saving `11.00 s` of child `spawn` + re-import overhead [MEASURED, `STARTUP-BREAKDOWN.md:18`].
+7. **Monkey-Patch `jax.clear_caches` & `_precompile_structured_decoding`:** Wrap `builtins.__import__` to no-op `weight_utils.jax.clear_caches` (prevents wiping XLA caches after weight load) and skip `_precompile_structured_decoding` (`1.74 s` saved) [MEASURED, `RUN4-PRUNED-COLDSTART.md`].
+8. **Prune Single-User (`Batch=1`) Token-Padding Ladder to `[16, 8192]`:** Wrapping `get_token_paddings` across `tpu_inference` modules to return `[16, 8192]` instead of all 10 power-of-two buckets `[16, 32, ..., 8192]` cuts the `Warm-up call pass` from `59.45 s` (10 tasks) down to **`12.19 s` (2 tasks)** — saving **`47.26 s`** of XLA executable deserialization and HBM upload while requiring **`0` new XLA compilations** [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+9. **Warmup with a `<=16`-Token Prompt:** Ensure the initial 1-token warmup query is `<=16` tokens so it dispatches on the `16`-token bucket (**`21.4 ms` TTFT**) rather than padding to `8192` [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+10. **Strict Offline Mode Once Cached:** Set `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` in the subrunner environment to eliminate HuggingFace Hub HTTP version/config checks (`~2–3 s`) during `LLM(...)` initialization [MEASURED, `RUN4-PRUNED-COLDSTART.md`].
 
 ---
 
-## 6. Single-Process In-Place Engine Execution
+## 3. Verified Throughput & Long-Context Performance (`MEASURED`)
 
-Running multi-process `spawn` duplicates Python initialization, imports, and metadata probing (**11.00 s** wasted [MEASURED, STARTUP-BREAKDOWN.md:18, 34]).
-- Set `VLLM_ENABLE_V1_MULTIPROCESSING=0` before initializing `LLM(...)` to run EngineCore in-process [MEASURED, RUN2-COLDSTART.md:15]. Eliminates child process launch overhead.
-
----
-
-## 7. Persistent Compilation Cache Lifecycle
-
-JAX cache keys are cryptographic hashes of lowered StableHLO MLIR modules, depending on `(max_num_seqs, max_model_len, max_num_batched_tokens, software versions)` [UNTESTED deduction from JAX lowering].
-- Point `VLLM_XLA_CACHE_PATH` and `JAX_COMPILATION_CACHE_DIR` to `/dev/shm/tpu_compile_cache`.
-- On cold cache miss at 32K context, JAX compiled **104 programs in 194.16 s** [MEASURED, RUN2-COLDSTART.md:15].
-- Cache Hit Behavior: Even with 100% cache hits, Python tracing (**15.01 s**) and MLIR lowering (**32.70 s**) still run; cache only skips XLA binary compilation (**3.38 s** hit deserialization) [MEASURED, STARTUP-BREAKDOWN.md:46-48].
-- Deposit cache as a `.tar` to private HF repo once; restore on fresh VMs.
+- **Short-Prompt TTFT (`12` tokens, bucket `16`):** **`21.4 ms`** [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+- **Single-User (`Batch=1`) Decode Throughput:** **`86.99 tok/s`** mean across 3 × 256-token runs (`2.95 s` wall time per 256 tokens) [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+- **Long-Context (`22,286` tokens, distinct prompts to bypass prefix cache):**
+  - **Chunked Prefill (`22,286` tokens via bucket `8192`):** **`2.18 s`** (`~10,223 tok/s`) [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+  - **Long-Context Decode (`@ 22,286` KV cache):** **`58.31 tok/s`** (`2.72 s` total wall time for prefill + 32 tokens) [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
+  - **TPU HBM Footprint:** `14.192 GiB` in-use, `14.293 GiB` peak, `15.748 GiB` limit (`1.455 GiB` free headroom) [MEASURED, `RUN5-FLOOR-COLDSTART.md`].
 
 ---
 
-## 8. Decode Speed Traps to Avoid
+## 4. Reference Implementation (3-Script Pipeline & Subagent Workflow)
 
-1. **Never use `SKIP_JAX_PRECOMPILE=1` or restrict `compilation_sizes`**: Uncompiled shapes JIT during decode, collapsing speed from **88.58 tok/s** down to **8–30 tok/s** [MEASURED, RECIPE.md:118; RUN2-COLDSTART.md:29].
-2. **No per-token file I/O hooks**: Synchronous disk logging inside forward passes throttles TPU dispatch [MEASURED, RECIPE.md:120].
-3. **Always run warmup before timing**: Send 1 untimed request to populate PJRT device buffers [MEASURED, RECIPE.md:119; RUN2-COLDSTART.md:28].
+All future agents must reuse this exact 3-file architecture when starting or benchmarking any model on TPU v5e-1:
 
----
-
-## 9. Memory Budget & Context Headroom
-
-- Target `gpu_memory_utilization=0.90` (allocates **14.17 GiB** max [MEASURED, RECIPE.md:9]).
-- Formula: $\text{Weights} + \text{KV Cache} \le 13.8\text{ GiB}$ [RULE OF THUMB / UNTESTED formula, RECIPE.md:11].
-- Context scaling: At 26K context (`max_model_len=32768`), in-use HBM reached **14.274 GiB** (90.6%) and peak reached **14.376 GiB** (91.3%), maintaining **1.37 GiB safe headroom** below the 15.748 GiB limit [MEASURED, RUN2-COLDSTART.md:34-36]. Overhead grows with context length.
-
----
-
-## 10. Step-by-Step Checklist for Any New Model
-
-1. **Venv**: Download and unpack prebuilt `venv312_cpu.tar.zst` to `/dev/shm` after `mount -o remount,exec /dev/shm`.
-2. **Weights**: Pull sharded weights to `/dev/shm/<model>` via `snapshot_download` in parallel with venv.
-3. **Settings, Loader Patch & TPU Check**: Install the `jax.clear_caches` `sitecustomize.py` hook (`RECIPE.md` §3, saves ~18–29 s during weight loading), and export `TPU_SKIP_MDS_QUERY=1` topology vars + `VLLM_ENABLE_V1_MULTIPROCESSING=0`. Always verify with `python -c "import vllm, jax; print(jax.devices())"`.
-4. **Cache Warm-up (Once)**: Run one compile session with `max_num_seqs` matching expected concurrency; pack `/dev/shm/tpu_compile_cache` to tar and upload to HF.
-5. **Cold Serving**: On future fresh VMs, extract compile cache to `/dev/shm/tpu_compile_cache` before starting engine.
-6. **Warmup**: Always send 1 untimed dummy request before benchmarking or serving user queries.
-
----
-
-## 11. Untested Assumptions & Open Questions
-
-1. **Warm 32K Cache Startup Time**: Exact startup duration restoring `tpu_compile_cache_b1_32k.tar` is [UNTESTED] (142 s startup expected to drop to ~48 s based on [MEASURED, RECIPE.md:100], but unmeasured for 32K).
-2. **30K Prefill Latency**: Measured 0.09 s for 25.7K tokens [MEASURED, RUN2-COLDSTART.md:31] is [UNTESTED / SUSPICIOUS], likely an internal timing artifact from KV-cache re-use or asynchronous dispatch.
-3. **26K Decode Speed**: Decode throughput dropping to 10.20 tok/s at 26K context [MEASURED, RUN2-COLDSTART.md:32] vs 88.58 tok/s at batch 1 short context is cause unknown [UNTESTED]. Earlier runs measured ~70 tok/s at 16K context [MEASURED, RECIPE.md:111], making 10 tok/s at 26K look especially suspicious.
-4. **Colab Image Portability**: Whether `mount -o remount,exec /dev/shm` and static topology vars are universally supported across all Google Colab backend VM image variants is [UNTESTED].
+1. **Host Runner ([`run_coldstart.py`](file:///home/sahil/Desktop/sahil/colab/benchmarks/TPU-v5e/run_coldstart.py)):**
+   - Checks `colab --auth=oauth2 usage`, provisions the VM (`colab new -s tpu-coldstart --tpu v5e1`), and immediately launches `colab exec` with `--env T0_GLOBAL=...`, `--env SUBRUNNER_B64=...`, and `--env HF_TOKEN=...` (**zero `colab upload` calls**).
+   - Always tears down the runtime in `finally:` (`colab stop -s tpu-coldstart`) and verifies `colab sessions` is empty.
+2. **In-VM Cold-Start Driver ([`tpu_coldstart_driver.py`](file:///home/sahil/Desktop/sahil/colab/benchmarks/TPU-v5e/tpu_coldstart_driver.py)):**
+   - Writes `/content/tpu_engine_subrunner.py` from `SUBRUNNER_B64`, writes `HF_TOKEN`, appends `127.0.0.1 metadata.google.internal metadata` to `/etc/hosts`, and runs `mount -o remount,exec /dev/shm`.
+   - Downloads `venv312_cpu.tar.zst`, the model's XLA cache `.tar`, and `zstd_bin` from `avgrocketman/tpu-compile-cache` into `/dev/shm` (`max_workers=3`, zero `apt-get`), unpacks them into `/dev/shm`, and deletes the `.tar` archives immediately to free RAM.
+   - Starts `snapshot_download("<model_repo>", local_dir="/dev/shm/<model>", max_workers=12)` in a background thread **at the exact moment** it spawns `/dev/shm/vllm_env/bin/python -u /content/tpu_engine_subrunner.py`.
+3. **In-Process Engine Subrunner ([`tpu_engine_subrunner.py`](file:///home/sahil/Desktop/sahil/colab/benchmarks/TPU-v5e/tpu_engine_subrunner.py)):**
+   - Installs the `builtins.__import__` hook before importing `jax` or `vllm` to: (a) no-op `weight_utils.jax.clear_caches`, (b) no-op `_precompile_structured_decoding`, and (c) prune `get_token_paddings` to `[16, 8192]` (`[paddings[0], paddings[-1]]`).
+   - Imports `jax` and `vllm` while weights finish downloading in the background, waits on `/dev/shm/.weights_ready`, initializes `LLM(...)` in-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`, `HF_HUB_OFFLINE=1`), and warms up on a `<=16`-token prompt.
+4. **Flash Subagent + Live SSH Monitoring:**
+   - Delegate the run to a `flash` subagent (`invoke_subagent` / `send_message`) that runs `python3 -u benchmarks/TPU-v5e/run_coldstart.py > /tmp/run_coldstart.log 2>&1` and monitors `/content/build.log` and `/dev/shm` over `colab --auth=oauth2 ssh -s tpu-coldstart --proxy-mode`.

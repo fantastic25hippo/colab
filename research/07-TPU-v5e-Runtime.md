@@ -94,6 +94,6 @@ RuntimeProgramAllocationFailure: Attempting to reserve 384.11M at the bottom of 
 
 ## 9. Caveats
 
-- The “1.26 GiB XLA overhead” measurement assumes bucketed static shapes and pinned KV. An unbucketed model can still hit 4.5–6.5 GB and OOM; this is why LFM2.5-24B-A2B fails on v5e-1 (see 10).
+- The “1.26 GiB XLA overhead” measurement assumes bucketed static shapes and pinned KV. An unbucketed model can still hit 4.5–6.5 GB and OOM; for `LFM2.5-24B-A2B` (`11.33 GiB` in W4A16 `g128`), running at 200K context on v5e-1 requires both bucketed shapes and an INT8 Ring KV cache (`1.91 GiB` vs `3.81 GiB` BF16; see `10`).
 - `--kv-cache-dtype int8` vs `fp8` is contested; verify actual KV allocation in `kv_cache_utils.py` logs. See `07b` for the vLLM/TorchTPU launch details.
 - TorchTPU 0.2.0 + libtpu 0.0.50 is a fast-moving stack; pin versions.

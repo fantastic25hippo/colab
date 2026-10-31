@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, time
+import base64, json, os, subprocess, sys, time
 
 def run_cmd(cmd, capture=True):
     print(f"RUN: {' '.join(cmd)}", flush=True)
@@ -28,37 +28,30 @@ def main():
     u_start = get_usage()
     print("USAGE_START:\n" + u_start, flush=True)
 
+    token_p = os.path.expanduser("~/.config/colab-cli/hf_token")
+    hf_tok = open(token_p).read().strip() if os.path.exists(token_p) else ""
+    with open("benchmarks/TPU-v5e/tpu_engine_subrunner.py", "rb") as f:
+        sub_b64 = base64.b64encode(f.read()).decode("ascii")
+
     t0_global = time.time()
     results = []
     try:
         print(f"=== Creating TPU v5e-1 Session: {sess} ===", flush=True)
         r_new = run_cmd(["colab", "--auth=oauth2", "new", "-s", sess, "--tpu", "v5e1"], capture=False)
         if r_new.returncode != 0: raise RuntimeError(f"Failed to create session {sess}")
-        time.sleep(5)
+        t_provision_s = time.time() - t0_global
+        print(f"=== Session provisioned in {t_provision_s:.2f}s (0 pre-exec uploads) ===", flush=True)
 
-        print("=== Checking SSH connectivity ===", flush=True)
-        ssh_key = os.path.expanduser("~/.ssh/colab_ed25519")
-        ssh_cmd = [
-            "ssh", "-i", ssh_key,
-            "-o", f"ProxyCommand=colab --auth=oauth2 ssh --proxy-mode -s {sess} -i {ssh_key}",
-            "-o", "StrictHostKeyChecking=no", "root@colab", "echo SSH_CONNECTED && uptime"
+        t0_exec = time.time()
+        print(f"=== Streaming execution of tpu_coldstart_driver.py (t0_global={t0_global:.2f}, t0_exec={t0_exec:.2f}) ===", flush=True)
+        exec_cmd = [
+            "colab", "--auth=oauth2", "exec", "-s", sess, "--timeout", "86400",
+            "--env", f"T0_GLOBAL={t0_global}",
+            "--env", f"SUBRUNNER_B64={sub_b64}",
+            "--env", f"HF_TOKEN={hf_tok}",
+            "-f", "benchmarks/TPU-v5e/tpu_coldstart_driver.py"
         ]
-        r_ssh = run_cmd(ssh_cmd, capture=True)
-        print("SSH_TEST_OUTPUT:\n" + r_ssh.stdout.strip(), flush=True)
-
-        print("=== Uploading scripts & auth token ===", flush=True)
-        token_p = os.path.expanduser("~/.config/colab-cli/hf_token")
-        if os.path.exists(token_p):
-            run_cmd(["colab", "--auth=oauth2", "upload", "-s", sess, token_p, "/content/hf_token"])
-        run_cmd(["colab", "--auth=oauth2", "upload", "-s", sess, "benchmarks/TPU-v5e/tpu_engine_subrunner.py", "/content/tpu_engine_subrunner.py"])
-        run_cmd(["colab", "--auth=oauth2", "upload", "-s", sess, "benchmarks/TPU-v5e/tpu_coldstart_driver.py", "/content/tpu_coldstart_driver.py"])
-
-        print(f"=== Streaming execution of tpu_coldstart_driver.py (t0={t0_global:.2f}) ===", flush=True)
-        proc = subprocess.Popen(
-            ["colab", "--auth=oauth2", "exec", "-s", sess, "--timeout", "86400",
-             "--env", f"T0_GLOBAL={t0_global}", "-f", "benchmarks/TPU-v5e/tpu_coldstart_driver.py"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
-        )
+        proc = subprocess.Popen(exec_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         lines = []
         for line in proc.stdout:
             sys.stdout.write(line); sys.stdout.flush(); lines.append(line)
@@ -67,6 +60,8 @@ def main():
             print(f"Driver execution failed with returncode {proc.returncode}", flush=True)
 
         results = parse_blocks(lines, "COLDSTART_RESULTS_JSONL")
+        if results:
+            results[0]["vm_provision_s"] = round(t_provision_s, 2)
     finally:
         print(f"=== Stopping session {sess} ===", flush=True)
         run_cmd(["colab", "--auth=oauth2", "stop", "-s", sess], capture=False)
@@ -79,7 +74,7 @@ def main():
     if results:
         print("=== FINAL_COLDSTART_RESULTS_RECORD ===", flush=True)
         print(json.dumps(results[0], indent=2), flush=True)
-        with open("benchmarks/TPU-v5e/tpu-final/run2_coldstart_results.json", "w") as f:
+        with open("benchmarks/TPU-v5e/tpu-final/run5_floor_coldstart_results.json", "w") as f:
             json.dump(results[0], f, indent=2)
 
 if __name__ == "__main__":

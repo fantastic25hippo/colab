@@ -1,0 +1,52 @@
+{
+  "t_remount_s": 0.01,
+  "venv_and_cache_prep": {
+    "dl_s": 2.6,
+    "unpack_s": 6.51,
+    "zstd_overlapped_s": 0.0,
+    "total_s": 9.11
+  },
+  "weights_dl_s": 6.03,
+  "in_vm_cold_start_to_first_token_s": 73.08,
+  "total_cold_start_to_first_token_s": 81.22,
+  "engine": {
+    "import_and_tpu_init_s": 19.39,
+    "wait_for_weights_s": 0.0,
+    "engine_init_s": 43.94,
+    "cache_entries_before": 109,
+    "cache_entries_after": 109,
+    "new_compiles": 0,
+    "ttft_short_s": 0.0214,
+    "first_token_ts": 1793440754.0361328,
+    "decode_runs": [
+      {
+        "tokens": 256,
+        "wall_s": 2.953,
+        "tok_s": 86.98
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.9516,
+        "tok_s": 87.02
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.9538,
+        "tok_s": 86.96
+      }
+    ],
+    "mean_decode_tok_s": 86.99,
+    "ctx_long": {
+      "tokens": 22286,
+      "prefill_s": 2.18,
+      "decode_tok_s": 58.31,
+      "wall_s": 2.72
+    },
+    "hbm": {
+      "in_use_gib": 14.192,
+      "peak_gib": 14.293,
+      "limit_gib": 15.748
+    }
+  },
+  "vm_provision_s": 4.77
+}
