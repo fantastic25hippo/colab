@@ -1,4 +1,4 @@
-import json, os, sys, time
+import builtins, json, os, sys, time
 
 sys.path.insert(0, "/content")
 try:
@@ -20,12 +20,54 @@ def log_sub(m):
         with open("/content/build.log", "a") as f: f.write(msg + "\n")
     except Exception: pass
 
+phase_data = {}
+def record_phase(name, t0, dur, **kw):
+    phase_data[name] = {"start": round(t0, 2), "dur": round(dur, 4), **kw}
+    extra = " " + " ".join(f"{k}={v}" for k, v in kw.items()) if kw else ""
+    log_sub(f"PHASE {name} start={t0:.2f} dur={dur:.2f}{extra}")
+
+def _hook_worker():
+    tw = sys.modules.get("tpu_inference.worker.tpu_worker")
+    cls = getattr(tw, "TPUWorker", None) if tw else None
+    if cls and not getattr(cls, "_phase_hooked", False):
+        cls._phase_hooked = True
+        orig_load = getattr(cls, "load_model", None)
+        if callable(orig_load):
+            def _w_load(self, *a, **kw):
+                t0 = time.time()
+                r = orig_load(self, *a, **kw)
+                record_phase("weight_load_to_tpu", t0, time.time() - t0)
+                return r
+            cls.load_model = _w_load
+        orig_warmup = getattr(cls, "compile_or_warm_up_model", None)
+        if callable(orig_warmup):
+            def _w_warmup(self, *a, **kw):
+                t0 = time.time()
+                cb = len(os.listdir("/dev/shm/tpu_compile_cache"))
+                r = orig_warmup(self, *a, **kw)
+                ca = len(os.listdir("/dev/shm/tpu_compile_cache"))
+                nc = max(0, ca - cb)
+                hits = cb if ca >= cb else 0
+                record_phase("compile_warmup", t0, time.time() - t0, compiled=nc, hits=hits)
+                return r
+            cls.compile_or_warm_up_model = _w_warmup
+
+_orig_imp = builtins.__import__
+def _phase_imp(name, *args, **kwargs):
+    res = _orig_imp(name, *args, **kwargs)
+    if "tpu_inference" in name:
+        _hook_worker()
+    return res
+builtins.__import__ = _phase_imp
+
 t_imp0 = time.time()
 log_sub("Importing jax and vllm (overlapped with weight download)...")
 import jax
 from vllm import LLM, SamplingParams
+_hook_worker()
 tpu_devs = str(jax.devices())
 t_import_s = time.time() - t_imp0
+record_phase("imports", t_imp0, t_import_s)
 log_sub(f"Imports + TPU init done in {t_import_s:.2f}s: {tpu_devs}")
 
 t_wait0 = time.time()
@@ -50,14 +92,25 @@ t_ready = time.time()
 init_dur = t_ready - t_eng0
 cache_after = len(os.listdir("/dev/shm/tpu_compile_cache"))
 new_compiles = max(0, cache_after - cache_before)
+cache_hits = cache_before if cache_after >= cache_before else 0
+
+if "weight_load_to_tpu" not in phase_data:
+    record_phase("weight_load_to_tpu", t_eng0, 0.0)
+if "compile_warmup" not in phase_data:
+    wl_dur = phase_data.get("weight_load_to_tpu", {}).get("dur", 0.0)
+    record_phase("compile_warmup", t_eng0 + wl_dur, max(0.0, init_dur - wl_dur),
+                 compiled=new_compiles, hits=cache_hits)
+
 log_sub(f"Engine ready in {init_dur:.2f}s (cache_before={cache_before}, cache_after={cache_after}, new_compiles={new_compiles})")
 
 p_short = "Deep space exploration reveals clues about cosmic microwave background and spacetime."
 sp_1 = SamplingParams(max_tokens=1, min_tokens=1, temperature=0.0, ignore_eos=True)
 t0 = time.perf_counter()
+t_ttft_wall = time.time()
 llm.generate([p_short], sp_1)
 ttft_short = time.perf_counter() - t0
 t_first_tok_wall = time.time()
+record_phase("first_token", t_ttft_wall, ttft_short)
 log_sub(f"Short prompt TTFT: {ttft_short:.4f}s")
 
 sp_256 = SamplingParams(max_tokens=256, min_tokens=256, temperature=0.0, ignore_eos=True)
@@ -94,14 +147,17 @@ hbm = get_hbm()
 log_sub(f"Long ctx ({p30k_tokens} tok): prefill={prefill_30k:.2f}s, decode={dec_tps_30k} tok/s, wall={wall_30k:.2f}s, HBM={hbm}")
 
 res = {
-    "import_and_tpu_init_s": round(t_import_s, 2), "wait_for_weights_s": round(t_wait_weights_s, 2),
-    "engine_init_s": round(init_dur, 2), "cache_entries_before": cache_before,
+    "import_and_tpu_init_s": round(t_import_s, 2), "import_start": round(t_imp0, 2),
+    "wait_for_weights_s": round(t_wait_weights_s, 2),
+    "engine_init_s": round(init_dur, 2), "engine_start": round(t_eng0, 2),
+    "cache_entries_before": cache_before,
     "cache_entries_after": cache_after, "new_compiles": new_compiles,
     "ttft_short_s": round(ttft_short, 4), "first_token_ts": t_first_tok_wall,
     "decode_runs": d_runs, "mean_decode_tok_s": mean_tok_s,
     "ctx_long": {"tokens": p30k_tokens, "prefill_s": round(prefill_30k, 2),
                  "decode_tok_s": dec_tps_30k, "wall_s": round(wall_30k, 2)},
-    "hbm": hbm
+    "hbm": hbm,
+    "phases": phase_data
 }
 with open("/content/engine_results.json", "w") as f: json.dump(res, f, indent=2)
 log_sub("=== SUBRUNNER_SUCCESS ===")

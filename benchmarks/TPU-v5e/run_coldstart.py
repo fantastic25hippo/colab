@@ -29,7 +29,7 @@ def main():
     print("USAGE_START:\n" + u_start, flush=True)
 
     token_p = os.path.expanduser("~/.config/colab-cli/hf_token")
-    hf_tok = open(token_p).read().strip() if os.path.exists(token_p) else ""
+    hf_tok = os.environ.get("HF_TOKEN") or (open(token_p).read().strip() if os.path.exists(token_p) else "")
     with open("benchmarks/TPU-v5e/tpu_engine_subrunner.py", "rb") as f:
         sub_b64 = base64.b64encode(f.read()).decode("ascii")
     with open("benchmarks/TPU-v5e/qwen_patches.py", "rb") as f:
@@ -80,8 +80,10 @@ def main():
     if results:
         print("=== FINAL_COLDSTART_RESULTS_RECORD ===", flush=True)
         print(json.dumps(results[0], indent=2), flush=True)
-        with open("benchmarks/TPU-v5e/tpu-final/run5_floor_coldstart_results.json", "w") as f:
+        out_path = sys.argv[1] if len(sys.argv) > 1 else "benchmarks/TPU-v5e/run_coldstart_results.json"
+        with open(out_path, "w") as f:
             json.dump(results[0], f, indent=2)
+        print(f"Saved results to {out_path}", flush=True)
 
 if __name__ == "__main__":
     main()
