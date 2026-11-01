@@ -56,7 +56,7 @@ Local code investigation of memory allocation, startup compilation, and installa
   - Build via uv with standalone Python: `uv venv --python 3.12.3 /content/venv312` (uses Astral's glibc 2.17+ build).
   - Install dependencies into `/content/venv312`.
   - Pack: `tar --zstd -cf vllm-tpu-py312.tar.zst -C /content venv312` (expected size: ~650–800 MiB compressed, ~2.2 GiB extracted).
-  - Upload to private HF repo `avgrocketman/tpu-compile-cache` under `env/vllm-tpu-0.32.0-py312/venv.tar.zst`.
+  - Upload to public HF repo `avgrocketman/tpu-compile-cache` under `env/vllm-tpu-0.32.0-py312/venv.tar.zst`.
   - Restore on VM: `huggingface_hub` snapshot to `/content`, extract in ~4 s. Total time: ~7 s.
 - **Recommended Offline Wheel Cache Alternative [proven approach / inferred timing]:**
   - Upload an archive of downloaded pre-built wheels (`vllm-tpu`, `tpu-inference`, `jax`, `jaxlib`, `libtpu`, `torch`) to HF (~480 MB).

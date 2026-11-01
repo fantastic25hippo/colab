@@ -36,7 +36,7 @@ Measured results for running models on Colab GPUs and TPUs, written so an agent 
 | :--- | :--- | :--- |
 | **TPU v5e-1** | `vllm-tpu==0.32.0` + `tpu-inference==0.32.0` (`torch==2.10.0+cpu`, Python 3.12 venv in `/dev/shm`) | **VERIFIED** (`73.08 s` in-VM / `81.22 s` global cold start, `21.4 ms` TTFT, **86.99 tok/s** decode, `0.04 CU`; see [`TPU-v5e/FAST-COLDSTART.md`](TPU-v5e/FAST-COLDSTART.md)) |
 | **L4, T4, A100, G4** | Prebuilt `llama.cpp` `b11954` CUDA 13.4 binary (`llama-b11954-bin-ubuntu-cuda-13.4-x64.tar.gz`) | **PINNED** (CUDA 12.8 binary failed `/health` against Colab driver 580.82.07 / CUDA 13.0; never compile on Colab) |
-| **G4 (Flint NVFP4)** | `llama.cpp` CUDA build with `RecursiveSI/flint-nvfp4-gguf` or `avgrocketman/flint-GGUF` | **UNVERIFIED on Colab** (documented on model card) |
+| **G4 (Flint NVFP4)** | `llama.cpp` CUDA build with `RecursiveSI/flint-nvfp4-gguf` | **UNVERIFIED on Colab** (documented on model card) |
 
 ## Subagent Execution & Live SSH Monitoring Protocol
 

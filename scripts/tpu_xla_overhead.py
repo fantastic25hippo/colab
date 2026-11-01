@@ -93,7 +93,7 @@ def main():
                 from huggingface_hub import HfApi
                 api = HfApi(token=hf_tok)
                 t_up0, rid = time.time(), "avgrocketman/tpu-compile-cache"
-                api.create_repo(repo_id=rid, repo_type="model", private=True, exist_ok=True)
+                api.create_repo(repo_id=rid, repo_type="model", private=False, exist_ok=True)
                 pfx = "gemma4-e4b-qat/vllm-tpu-0.32.0_jax-0.11.2"
                 api.upload_file(path_or_fileobj=tar_p, path_in_repo=f"{pfx}/cache.tar", repo_id=rid, repo_type="model")
                 api.upload_file(path_or_fileobj="/content/versions.json", path_in_repo=f"{pfx}/versions.json", repo_id=rid, repo_type="model")

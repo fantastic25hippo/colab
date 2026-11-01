@@ -50,7 +50,7 @@ Early characterization of vLLM runtime memory overhead, startup latencies, compi
 
 ## Hugging Face Artifacts Created
 
-Deposited into private repository `avgrocketman/tpu-compile-cache`:
+Deposited into public repository `avgrocketman/tpu-compile-cache`:
 - `venv312.tar`: Prebuilt standalone virtual environment with Python 3.12, vLLM TPU 0.32.0, tpu-inference 0.32.0, libtpu 0.0.48, and JAX 0.11.2.
 - `tpu_compile_cache.tar`: Serialized JAX persistent compilation cache containing all 69 AOT program hashes for Qwen3-4B on TPU v5e-1.
 - `versions.json`: Manifest recording package pins, hardware architecture, and compilation sizes.

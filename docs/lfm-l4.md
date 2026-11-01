@@ -6,8 +6,8 @@
 - **Public Hub Repository:** `avgrocketman/LFM2.5-24B-A2B-Q4-shards` (private=False, usedStorage 29753805120 bytes). Allows tokenless pull.
   - Blob: `LFM2.5-24B-A2B-UD-Q4_K_XL.gguf` (14876901632 B).
   - Shards: 16 files under `shards/` (`LFM2.5-24B-A2B-UD-Q4_K_XL-00001-of-00016.gguf` through `*-00016-of-00016.gguf`).
-- **Private Source Repository:** `avgrocketman/LFM2.5-24B-A2B-GGUF` (SHA256 `a235d23638cc5549cb1ff61da7522c8a7e97f056f27093462a1e56f35aba91d8`).
-- **Unused Repository:** `avgrocketman/flint-GGUF`.
+- **Public Source Repository:** `avgrocketman/LFM2.5-24B-A2B-Q4-shards` (SHA256 `a235d23638cc5549cb1ff61da7522c8a7e97f056f27093462a1e56f35aba91d8`; duplicate private repo `avgrocketman/LFM2.5-24B-A2B-GGUF` marked for deletion).
+- **Flint Repository:** `avgrocketman/flint-GGUF` (unused, marked for deletion; public upstream is `RecursiveSI/flint-nvfp4-gguf`).
 - **Preparation Job:** `20261028-173057-public-lfm-copy-a3cb` completed server-side Hub `copy_files` ok in ~5 min consuming 0 GPU.
 
 ### Hardware & Environment

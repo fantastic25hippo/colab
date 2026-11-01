@@ -9,7 +9,7 @@ Sahil's notes and measured runbooks for running open-source models on Google Col
 - **Fast TPU v5e-1 & L4 Cold Starts + Single-Stream Coding Speed.**
   - **TPU v5e-1 (`Qwen/Qwen3-4B` bf16, `vllm-tpu==0.32.0`) [MEASURED]:** **`73.08 s` in-VM (`81.22 s` global from `colab new`)** cold-start to first token (`3.48x` faster than the `282.46 s` cold baseline, spending only **`0.04 CU`**), with **`21.4 ms` TTFT**, **`86.99 tok/s`** single-stream decode (`1,653.4 tok/s` at Batch 32), and **`2.18 s` prefill (`10,223 tok/s`) / `58.31 tok/s` decode at `22,286` tokens**. See [`benchmarks/TPU-v5e/FAST-COLDSTART.md`](benchmarks/TPU-v5e/FAST-COLDSTART.md), [`benchmarks/TPU-v5e/tpu-final/RUN5-FLOOR-COLDSTART.md`](benchmarks/TPU-v5e/tpu-final/RUN5-FLOOR-COLDSTART.md), and [`benchmarks/TPU-v5e/RECIPE.md`](benchmarks/TPU-v5e/RECIPE.md).
   - **L4 Sharded Loading (`LFM2.5-24B-A2B-Q4`) [MEASURED]:** 16 shards (14.88 GB) pulled from public Hugging Face Hub into `/dev/shm` in **16.60 s (896 MB/s)**. Decode benchmark pending `llama-b11954` CUDA 13.4 binary verification. See [`docs/lfm-l4.md`](docs/lfm-l4.md) and [`benchmarks/HF-transfer/L4/SWEEP.md`](benchmarks/HF-transfer/L4/SWEEP.md).
-  - **Flint (39.8B MoE, ~2.5B active) [ESTIMATE]:** Deposited in `avgrocketman/flint-GGUF` (25.1 GB `UD-Q4_K_XL`), unbenchmarked on Colab GPU.
+  - **Flint (39.8B MoE, ~2.5B active) [ESTIMATE]:** Public upstream `RecursiveSI/flint-nvfp4-gguf` / `unsloth/flint-GGUF`, unbenchmarked on Colab GPU.
 
 ---
 

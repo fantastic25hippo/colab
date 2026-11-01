@@ -8,7 +8,7 @@ Deposited Unsloth Dynamic 4-bit GGUF models (`UD-Q4_K_XL`) in llama.cpp format.
 
 ### 1. LFM2.5-24B-A2B
 
-- **Destination Repository**: `avgrocketman/LFM2.5-24B-A2B-GGUF` (private)
+- **Destination Repository**: `avgrocketman/LFM2.5-24B-A2B-Q4-shards` (public)
 - **File**: `LFM2.5-24B-A2B-UD-Q4_K_XL.gguf`
 - **Size**: 14,876,901,632 bytes (~14.9 GB)
 - **SHA256**: `a235d23638cc5549cb1ff61da7522c8a7e97f056f27093462a1e56f35aba91d8`
@@ -19,7 +19,7 @@ Deposited Unsloth Dynamic 4-bit GGUF models (`UD-Q4_K_XL`) in llama.cpp format.
 
 ### 2. Flint
 
-- **Destination Repository**: `avgrocketman/flint-GGUF` (private)
+- **Upstream Repository**: `unsloth/flint-GGUF` (public; `avgrocketman/flint-GGUF` marked for deletion)
 - **File**: `flint-UD-Q4_K_XL.gguf`
 - **Size**: 25,054,688,704 bytes (~25.1 GB)
 - **SHA256**: `63c2ecc461ca545134b670c660e76fa20f47240f8d39b6510bfd21c4dd6e072f`
@@ -45,7 +45,7 @@ Deposited Unsloth Dynamic 4-bit GGUF models (`UD-Q4_K_XL`) in llama.cpp format.
 - **LFS Mechanics**: Hugging Face LFS uploads require computing the SHA256 upfront before the upload request starts. Consequently, single-blob streaming remains serial (`GET` then `PUT`). Multi-shard architectures can pipeline downloading shard `n+1` while uploading shard `n`.
 - **Status of GGUF Benchmarks**:
   - `LFM2.5-24B-A2B-Q4`: Sharded into `avgrocketman/LFM2.5-24B-A2B-Q4-shards` (public) and download-benchmarked on L4 (16.60 s into `/dev/shm`); `llama-server` decode pending CUDA 13.4 binary test (see [`../docs/lfm-l4.md`](../docs/lfm-l4.md)).
-  - `Flint`: Deposited in `avgrocketman/flint-GGUF` (25.1 GB single blob); unsharded and unbenchmarked on Colab GPU.
+  - `Flint`: Upstream public repo is `unsloth/flint-GGUF` / `RecursiveSI/flint-nvfp4-gguf`; `avgrocketman/flint-GGUF` marked for deletion.
 - **Resource Accounting & Policy**:
   - Check live CU balance via `colab --auth=oauth2 usage` before and after every session.
   - Inference Gate: Do not start any L4, A100, or G4 instances for inference until Sahil explicitly gives approval.

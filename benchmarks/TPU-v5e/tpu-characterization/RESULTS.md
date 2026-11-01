@@ -108,7 +108,7 @@ All values measured directly from `jax.local_devices()[0].memory_stats()`:
 
 ## 6. Hugging Face Cache Deposit
 
-- **Repository:** `avgrocketman/tpu-compile-cache` (private)
+- **Repository:** `avgrocketman/tpu-compile-cache` (public)
 - **Artifact Updated:** `tpu_compile_cache.tar` (re-packed and uploaded with all 404 newly compiled programs for `max_model_len=17408`).
 - **Manifest:** `versions.json` updated with engine settings and cache hashes.
 
