@@ -238,15 +238,16 @@ def test_tpu_runner_warning_filter_and_wrapper_modules():
         sys.modules.pop(wrap.__name__, None)
     print("PASS")
 
-def test_subrunner_int8_kv_and_jax_cache_env():
-    print("[TEST 8] Verifying int8 KV flag and JAX persistent cache env...", end=" ")
+def test_subrunner_default_kv_and_jax_cache_env():
+    print("[TEST 8] Verifying default KV dtype, chat template, JAX cache env...", end=" ")
     here = os.path.dirname(os.path.abspath(__file__))
     src = open(os.path.join(here, "lfm25_engine_subrunner.py")).read()
-    # 2026-11-01: vLLM rejected "int8"; fp8 is the documented fallback.
-    assert 'kv_cache_dtype="fp8"' in src
-    assert 'rejected "int8"' in src
+    # 2026-11-01: kv_cache_dtype must stay at vLLM's default ("auto" -> bf16).
+    assert "kv_cache_dtype=" not in src, "subrunner still sets kv_cache_dtype"
     assert 'JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES": "-1"' in src
     assert 'JAX_PERSISTENT_CACHE_ENABLE_XLA_CACHES": "all"' in src
+    assert "add_generation_prompt=True" in src
+    assert "max_tokens=1" in src
     print("PASS")
 
 if __name__ == "__main__":
@@ -258,6 +259,6 @@ if __name__ == "__main__":
     test_sys_modules_hook_and_sd_layout()
     test_lookup_conv_cache_metadata_slot_n_and_mask()
     test_tpu_runner_warning_filter_and_wrapper_modules()
-    test_subrunner_int8_kv_and_jax_cache_env()
+    test_subrunner_default_kv_and_jax_cache_env()
     print(f"All 8 verification test suites passed in {time.time() - t0:.2f}s!")
 

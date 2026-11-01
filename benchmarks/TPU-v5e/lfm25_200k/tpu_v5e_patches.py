@@ -1,5 +1,10 @@
 import builtins, logging, os, sys, torch, torch.nn.functional as F
 
+try:
+    from lfm25_startup import install_phase_hooks
+except Exception:
+    install_phase_hooks = None
+
 _PAD_MODULE_NAMES = (
     "tpu_inference.runner.utils",
     "tpu_inference.runner.tpu_runner",
@@ -223,6 +228,10 @@ def _patch_vllm_model_wrapper(mod):
 
 def _patch_loaded_module(name, mod):
     if not mod: return
+    # 2026-11-01: per-phase timers (weight load / KV alloc / compile+warmup).
+    if install_phase_hooks and name.endswith(("worker.tpu_worker", "runner.compilation_manager")):
+        try: install_phase_hooks()
+        except Exception: pass
     if "short_conv" in name:
         cls = getattr(mod, "ShortConv", None)
         if cls and cls.forward is not _tpu_xla_short_conv_forward:

@@ -1,43 +1,10 @@
-import builtins, json, os, sys, time, urllib.error, urllib.request
+import json, os, sys, time
 
-# Fail fast on Colab's non-existent GCE TPU metadata endpoint instead of waiting on 404 retries
-_orig_urlopen = urllib.request.urlopen
-def _fast_urlopen(url, *args, **kwargs):
-    u_str = url if isinstance(url, str) else getattr(url, "full_url", str(url))
-    if "metadata.google.internal" in u_str:
-        raise urllib.error.URLError("Bypassed GCE metadata poll on Colab")
-    return _orig_urlopen(url, *args, **kwargs)
-urllib.request.urlopen = _fast_urlopen
-
-def _wrap_get_token_paddings(orig_fn):
-    def _wrapped(*args, **kwargs):
-        paddings = orig_fn(*args, **kwargs)
-        if isinstance(paddings, list) and len(paddings) > 2:
-            pruned = sorted(set([paddings[0], paddings[-1]]))
-            print(f"[SUBRUNNER_HOOK] Pruned token paddings {paddings} -> {pruned}", flush=True)
-            return pruned
-        return paddings
-    _wrapped._is_pruned = True
-    return _wrapped
-
-orig_imp = builtins.__import__
-def custom_imp(name, *args, **kwargs):
-    res = orig_imp(name, *args, **kwargs)
-    if name.startswith("tpu_inference"):
-        mod_w = sys.modules.get("tpu_inference.models.jax.utils.weight_utils")
-        if mod_w and hasattr(mod_w, "jax"):
-            mod_w.jax.clear_caches = lambda: None
-        for m_name, m in list(sys.modules.items()):
-            if m and m_name.startswith("tpu_inference"):
-                fn = getattr(m, "get_token_paddings", None)
-                if callable(fn) and not getattr(fn, "_is_pruned", False):
-                    setattr(m, "get_token_paddings", _wrap_get_token_paddings(fn))
-                for c_name in ("TPUModelRunner", "CompilationManager"):
-                    cls = getattr(m, c_name, None)
-                    if cls and hasattr(cls, "_precompile_structured_decoding"):
-                        setattr(cls, "_precompile_structured_decoding", lambda self, *a, **kw: None)
-    return res
-builtins.__import__ = custom_imp
+sys.path.insert(0, "/content")
+try:
+    import qwen_patches
+    qwen_patches.install_qwen_patches()
+except Exception: pass
 
 os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
 os.environ["VLLM_XLA_CACHE_PATH"] = "/dev/shm/tpu_compile_cache"

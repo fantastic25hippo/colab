@@ -32,6 +32,10 @@ def main():
     hf_tok = open(token_p).read().strip() if os.path.exists(token_p) else ""
     with open("benchmarks/TPU-v5e/tpu_engine_subrunner.py", "rb") as f:
         sub_b64 = base64.b64encode(f.read()).decode("ascii")
+    with open("benchmarks/TPU-v5e/qwen_patches.py", "rb") as f:
+        patches_b64 = base64.b64encode(f.read()).decode("ascii")
+    with open("benchmarks/TPU-v5e/cache_naming.py", "rb") as f:
+        naming_b64 = base64.b64encode(f.read()).decode("ascii")
 
     t0_global = time.time()
     results = []
@@ -48,6 +52,8 @@ def main():
             "colab", "--auth=oauth2", "exec", "-s", sess, "--timeout", "86400",
             "--env", f"T0_GLOBAL={t0_global}",
             "--env", f"SUBRUNNER_B64={sub_b64}",
+            "--env", f"PATCHES_B64={patches_b64}",
+            "--env", f"CACHE_NAMING_B64={naming_b64}",
             "--env", f"HF_TOKEN={hf_tok}",
             "-f", "benchmarks/TPU-v5e/tpu_coldstart_driver.py"
         ]

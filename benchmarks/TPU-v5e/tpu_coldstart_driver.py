@@ -19,6 +19,20 @@ log(f"In-VM cold-start timer started at t_vm0={t_vm0:.2f} (t_global0={t_global0:
 if os.environ.get("SUBRUNNER_B64"):
     with open("/content/tpu_engine_subrunner.py", "wb") as f:
         f.write(base64.b64decode(os.environ["SUBRUNNER_B64"]))
+if os.environ.get("PATCHES_B64"):
+    with open("/content/qwen_patches.py", "wb") as f:
+        f.write(base64.b64decode(os.environ["PATCHES_B64"]))
+if os.environ.get("CACHE_NAMING_B64"):
+    with open("/content/cache_naming.py", "wb") as f:
+        f.write(base64.b64decode(os.environ["CACHE_NAMING_B64"]))
+
+sys.path.insert(0, "/content")
+try:
+    from cache_naming import build_cache_name
+except ImportError:
+    _d = os.path.dirname(os.path.abspath(__file__))
+    if _d not in sys.path: sys.path.insert(0, _d)
+    from cache_naming import build_cache_name
 
 if os.environ.get("HF_TOKEN"):
     for d in ["/root/.cache/huggingface", "/root/.config/huggingface"]:
@@ -47,29 +61,51 @@ if os.path.exists("/dev/shm/.weights_ready"):
 
 def dl_venv_and_cache():
     t0 = time.time()
+    patch_bytes = open("/content/qwen_patches.py", "rb").read() if os.path.exists("/content/qwen_patches.py") else b""
+    expected_cache = build_cache_name(
+        model_slug="qwen3-4b",
+        vllm_version="0.32.0",
+        max_model_len=32768,
+        buckets="16-32768",
+        llm_args={"gpu_memory_utilization": 0.90, "max_model_len": 32768, "max_num_seqs": 1, "trust_remote_code": True},
+        patch_content=patch_bytes,
+    )
+
+    def _dl_cache():
+        try:
+            return hf_hub_download(repo_id="avgrocketman/tpu-compile-cache",
+                                   filename=expected_cache, local_dir="/dev/shm")
+        except Exception:
+            log(f"cache miss: {expected_cache}")
+            return None
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as p_dl:
         f_v = p_dl.submit(hf_hub_download, repo_id="avgrocketman/tpu-compile-cache",
                           filename="venv312_cpu.tar.zst", local_dir="/dev/shm")
-        f_c = p_dl.submit(hf_hub_download, repo_id="avgrocketman/tpu-compile-cache",
-                          filename="tpu_compile_cache_b1_32k.tar", local_dir="/dev/shm")
+        f_c = p_dl.submit(_dl_cache)
         f_z = p_dl.submit(hf_hub_download, repo_id="avgrocketman/tpu-compile-cache",
                           filename="zstd_bin", local_dir="/dev/shm")
         p_venv, p_cache, p_zstd = f_v.result(), f_c.result(), f_z.result()
     os.chmod(p_zstd, 0o755)
     t_dl = time.time() - t0
-    log(f"Downloaded venv + 32K XLA cache + zstd_bin to /dev/shm in {t_dl:.2f}s (zero apt-get)")
+    c_status = f"hit ({expected_cache})" if p_cache else f"miss ({expected_cache})"
+    log(f"Downloaded venv + cache {c_status} + zstd_bin to /dev/shm in {t_dl:.2f}s (zero apt-get)")
     return p_venv, p_cache, p_zstd, round(t_dl, 2)
 
 def unpack_venv_and_cache(p_venv, p_cache, p_zstd):
     t_u0 = time.time()
-    subprocess.run(["tar", "-xf", p_cache, "-C", "/dev/shm"], check=True)
-    try: os.remove(p_cache)
-    except Exception: pass
+    if p_cache and os.path.exists(p_cache):
+        subprocess.run(["tar", "-xf", p_cache, "-C", "/dev/shm"], check=True)
+        try: os.remove(p_cache)
+        except Exception: pass
+    else:
+        shutil.rmtree("/dev/shm/tpu_compile_cache", ignore_errors=True)
+        os.makedirs("/dev/shm/tpu_compile_cache", exist_ok=True)
     subprocess.run(["sh", "-c", f"{p_zstd} -d -T0 -c {p_venv} | tar -xf - -C /dev/shm"], check=True)
     try: os.remove(p_venv)
     except Exception: pass
     t_unpack = time.time() - t_u0
-    log(f"Unpacked venv + 32K XLA cache in {t_unpack:.2f}s (freed archives from /dev/shm)")
+    log(f"Unpacked venv and cache to /dev/shm in {t_unpack:.2f}s")
     return round(t_unpack, 2)
 
 def dl_weights():
