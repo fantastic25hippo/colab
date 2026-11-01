@@ -1,0 +1,118 @@
+{
+  "t_remount_s": 0.01,
+  "venv_and_cache_prep": {
+    "dl_s": 2.54,
+    "unpack_s": 6.29,
+    "zstd_overlapped_s": 0.0,
+    "total_s": 8.83
+  },
+  "weights_dl_s": 5.98,
+  "in_vm_cold_start_to_first_token_s": 72.54,
+  "total_cold_start_to_first_token_s": 80.7,
+  "engine": {
+    "import_and_tpu_init_s": 19.51,
+    "import_start": 1793557515.76,
+    "wait_for_weights_s": 0.0,
+    "engine_init_s": 43.57,
+    "engine_start": 1793557535.27,
+    "cache_entries_before": 58,
+    "cache_entries_after": 58,
+    "new_compiles": 0,
+    "ttft_short_s": 0.0213,
+    "first_token_ts": 1793557578.8608685,
+    "decode_runs": [
+      {
+        "tokens": 256,
+        "wall_s": 2.9541,
+        "tok_s": 86.95
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.9531,
+        "tok_s": 86.98
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.9543,
+        "tok_s": 86.94
+      }
+    ],
+    "mean_decode_tok_s": 86.96,
+    "ctx_long": {
+      "tokens": 22286,
+      "prefill_s": 2.18,
+      "decode_tok_s": 58.27,
+      "wall_s": 2.72
+    },
+    "hbm": {
+      "in_use_gib": 14.192,
+      "peak_gib": 14.293,
+      "limit_gib": 15.748
+    },
+    "phases": {
+      "imports": {
+        "start": 1793557515.76,
+        "dur": 19.5072
+      },
+      "weight_load_to_tpu": {
+        "start": 1793557553.13,
+        "dur": 11.9808
+      },
+      "compile_warmup": {
+        "start": 1793557565.66,
+        "dur": 12.388,
+        "compiled": 0,
+        "hits": 58
+      },
+      "first_token": {
+        "start": 1793557578.84,
+        "dur": 0.0213
+      }
+    }
+  },
+  "phases": {
+    "runtime_connect": {
+      "start": 1793557498.16,
+      "dur": 8.16
+    },
+    "venv_restore": {
+      "start": 1793557506.81,
+      "dur": 8.83
+    },
+    "cache_restore": {
+      "start": 1793557506.81,
+      "dur": 2.03,
+      "status": "hit",
+      "name": "tpu_compile_cache__qwen3-4b__vllm0.32.0__len32768__b16-32768__e4cc071f.tar"
+    },
+    "weight_download": {
+      "start": 1793557515.64,
+      "dur": 5.98
+    },
+    "imports": {
+      "start": 1793557515.76,
+      "dur": 19.5072
+    },
+    "weight_load_to_tpu": {
+      "start": 1793557553.13,
+      "dur": 11.9808
+    },
+    "compile_warmup": {
+      "start": 1793557565.66,
+      "dur": 12.388,
+      "compiled": 0,
+      "hits": 58
+    },
+    "first_token": {
+      "start": 1793557578.84,
+      "dur": 0.0213
+    },
+    "total": {
+      "start": 1793557498.16,
+      "dur": 80.7,
+      "in_vm_dur": 72.54
+    }
+  },
+  "publish": null,
+  "vm_provision_s": 4.67
+}

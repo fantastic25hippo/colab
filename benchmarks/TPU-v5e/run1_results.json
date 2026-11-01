@@ -1,0 +1,122 @@
+{
+  "t_remount_s": 0.08,
+  "venv_and_cache_prep": {
+    "dl_s": 3.39,
+    "unpack_s": 6.53,
+    "zstd_overlapped_s": 0.0,
+    "total_s": 9.93
+  },
+  "weights_dl_s": 6.13,
+  "in_vm_cold_start_to_first_token_s": 98.54,
+  "total_cold_start_to_first_token_s": 109.8,
+  "engine": {
+    "import_and_tpu_init_s": 19.76,
+    "import_start": 1793557345.31,
+    "wait_for_weights_s": 0.0,
+    "engine_init_s": 67.14,
+    "engine_start": 1793557365.08,
+    "cache_entries_before": 0,
+    "cache_entries_after": 55,
+    "new_compiles": 55,
+    "ttft_short_s": 0.0698,
+    "first_token_ts": 1793557432.2916405,
+    "decode_runs": [
+      {
+        "tokens": 256,
+        "wall_s": 2.9534,
+        "tok_s": 88.43
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.9519,
+        "tok_s": 88.48
+      },
+      {
+        "tokens": 256,
+        "wall_s": 2.953,
+        "tok_s": 88.44
+      }
+    ],
+    "mean_decode_tok_s": 88.45,
+    "ctx_long": {
+      "tokens": 22286,
+      "prefill_s": 2.21,
+      "decode_tok_s": 60.84,
+      "wall_s": 2.72
+    },
+    "hbm": {
+      "in_use_gib": 14.192,
+      "peak_gib": 14.293,
+      "limit_gib": 15.748
+    },
+    "phases": {
+      "imports": {
+        "start": 1793557345.31,
+        "dur": 19.7631
+      },
+      "weight_load_to_tpu": {
+        "start": 1793557383.37,
+        "dur": 13.3372
+      },
+      "compile_warmup": {
+        "start": 1793557402.22,
+        "dur": 29.2249,
+        "compiled": 15,
+        "hits": 40
+      },
+      "first_token": {
+        "start": 1793557432.22,
+        "dur": 0.0698
+      }
+    }
+  },
+  "phases": {
+    "runtime_connect": {
+      "start": 1793557322.49,
+      "dur": 11.26
+    },
+    "venv_restore": {
+      "start": 1793557334.66,
+      "dur": 9.93
+    },
+    "cache_restore": {
+      "start": 1793557334.66,
+      "dur": 0.23,
+      "status": "miss",
+      "name": "tpu_compile_cache__qwen3-4b__vllm0.32.0__len32768__b16-32768__e4cc071f.tar"
+    },
+    "weight_download": {
+      "start": 1793557344.59,
+      "dur": 6.13
+    },
+    "imports": {
+      "start": 1793557345.31,
+      "dur": 19.7631
+    },
+    "weight_load_to_tpu": {
+      "start": 1793557383.37,
+      "dur": 13.3372
+    },
+    "compile_warmup": {
+      "start": 1793557402.22,
+      "dur": 29.2249,
+      "compiled": 15,
+      "hits": 40
+    },
+    "first_token": {
+      "start": 1793557432.22,
+      "dur": 0.0698
+    },
+    "total": {
+      "start": 1793557322.49,
+      "dur": 109.8,
+      "in_vm_dur": 98.54
+    }
+  },
+  "publish": {
+    "name": "tpu_compile_cache__qwen3-4b__vllm0.32.0__len32768__b16-32768__e4cc071f.tar",
+    "size_mb": 12.86,
+    "upload_s": 2.52
+  },
+  "vm_provision_s": 5.04
+}
