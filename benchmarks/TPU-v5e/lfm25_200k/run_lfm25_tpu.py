@@ -16,14 +16,17 @@ def encode_file(path):
     with open(path, "rb") as f: return base64.b64encode(f.read()).decode("ascii")
 
 def main():
+    diag = "--diag" in sys.argv[1:]
     sess = "tpu-lfm25"
+    if diag: print("=== DIAG MODE: diag_short_subrunner.py (4096 ctx, 30 min cap) ===", flush=True)
     print("=== Checking Initial Compute Units Usage ===", flush=True)
     u_start = get_usage()
     print("USAGE_START:\n" + u_start, flush=True)
 
     token_p = os.path.expanduser("~/.config/colab-cli/hf_token")
     hf_tok = open(token_p).read().strip() if os.path.exists(token_p) else ""
-    sub_b64 = encode_file("benchmarks/TPU-v5e/lfm25_200k/lfm25_engine_subrunner.py")
+    sub_file = "diag_short_subrunner.py" if diag else "lfm25_engine_subrunner.py"
+    sub_b64 = encode_file(f"benchmarks/TPU-v5e/lfm25_200k/{sub_file}")
     patches_b64 = encode_file("benchmarks/TPU-v5e/lfm25_200k/tpu_v5e_patches.py")
     pallas_b64 = encode_file("benchmarks/TPU-v5e/lfm25_200k/k8v4_pallas_kernel.py")
 
@@ -37,12 +40,14 @@ def main():
         print(f"=== TPU session provisioned in {t_prov:.2f}s ===", flush=True)
 
         exec_cmd = [
-            "colab", "--auth=oauth2", "exec", "-s", sess, "--timeout", "86400",
+            "colab", "--auth=oauth2", "exec", "-s", sess,
+            "--timeout", "1800" if diag else "86400",
             "--env", f"T0_GLOBAL={t0_global}",
             "--env", f"SUBRUNNER_B64={sub_b64}",
             "--env", f"PATCHES_B64={patches_b64}",
             "--env", f"PALLAS_B64={pallas_b64}",
             "--env", f"HF_TOKEN={hf_tok}",
+        ] + (["--env", "LFM_DIAG=1"] if diag else []) + [
             "-f", "benchmarks/TPU-v5e/lfm25_200k/lfm25_coldstart_driver.py"
         ]
         proc = subprocess.Popen(exec_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -73,7 +78,8 @@ def main():
     if results:
         print("=== FINAL_LFM25_TPU_RESULTS ===", flush=True)
         print(json.dumps(results[0], indent=2), flush=True)
-        with open("benchmarks/TPU-v5e/lfm25_200k/run_results.json", "w") as f:
+        out_name = "run_results_diag.json" if diag else "run_results.json"
+        with open(f"benchmarks/TPU-v5e/lfm25_200k/{out_name}", "w") as f:
             json.dump(results[0], f, indent=2)
 
 if __name__ == "__main__":

@@ -17,8 +17,11 @@ t_global0 = float(os.environ.get("T0_GLOBAL", t_vm0))
 log(f"In-VM 200K cold-start timer started at t_vm0={t_vm0:.2f} (t_global0={t_global0:.2f})")
 
 # Unpack subrunner, patches, and pallas kernel into /content/
+diag = os.environ.get("LFM_DIAG") == "1"
+sub_name = "diag_short_subrunner.py" if diag else "lfm25_engine_subrunner.py"
+if diag: log("LFM_DIAG=1: launching short-context diagnostic subrunner")
 for env_k, target_f in [
-    ("SUBRUNNER_B64", "/content/lfm25_engine_subrunner.py"),
+    ("SUBRUNNER_B64", f"/content/{sub_name}"),
     ("PATCHES_B64", "/content/tpu_v5e_patches.py"),
     ("PALLAS_B64", "/content/k8v4_pallas_kernel.py"),
 ]:
@@ -111,8 +114,9 @@ env_b.update({
     "JAX_PLATFORMS": "tpu,cpu", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
     "VLLM_LOGGING_LEVEL": "INFO"
 })
+if diag: env_b.update({"LFM_DIAG": "1", "LFM_CONV_DEBUG": "1"})
 
-proc = subprocess.Popen([py_bin, "-u", "/content/lfm25_engine_subrunner.py"],
+proc = subprocess.Popen([py_bin, "-u", f"/content/{sub_name}"],
                         env=env_b, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 for line in proc.stdout: sys.stdout.write(line); sys.stdout.flush()
 proc.wait()

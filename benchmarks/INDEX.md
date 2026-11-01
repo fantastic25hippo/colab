@@ -4,6 +4,7 @@ One row per entry, newest first. Format and rules: [`README.md`](README.md). Spe
 
 | Date (IST) | Model / Task | Quant | Accelerator | Engine + build | Prefill (pp512 / TTFT) | Decode (tok/s) | CU/hr | CU used | Entry |
 | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| 2026-11-01 | LiquidAI/LFM2.5-24B-A2B (diag, 4096 ctx, chat vs raw) | W8A8+W4A16 | TPU-v5e | vllm-tpu 0.32.0 (`318.7s` in-VM / `330.2s` global) | n/a (B 0.59s, C 0.38s for 64 tok) | n/a (B coherent, C loops) | 3.09 | 0.10 | [entry](TPU-v5e/lfm25_200k/RESULTS.md) |
 | 2026-11-01 | LiquidAI/LFM2.5-24B-A2B (200K, B=1, fp8 KV) | W8A8+W4A16 | TPU-v5e | vllm-tpu 0.32.0 (`425.1s` in-VM / `435.6s` global) | 0.161s TTFT (32.38s @200K) | 165.91 (1.94 @200K, prefill in wall) | 3.09 | 0.31 | [entry](TPU-v5e/lfm25_200k/RESULTS.md) |
 | 2026-10-31 | LiquidAI/LFM2.5-24B-A2B (200K, B=1) | W8A8+W4A16 | TPU-v5e | vllm-tpu 0.32.0 (`310.9s` in-VM / `321.0s` global) | 0.153s TTFT (32.58s @200K) | 170.26 (1.93 @200K, prefill in wall) | 3.09 | 0.22 | [entry](TPU-v5e/lfm25_200k/RESULTS.md) |
 | 2026-10-31 | Qwen/Qwen3-4B (32K floor cold start, Run 5) | bf16 | TPU-v5e | vllm-tpu 0.32.0 (`73.1s` in-VM / `81.2s` global, `[16,8192]` buckets, 0 apt/uploads) | 21.4 ms TTFT (2.18s @22.3K) | 86.99 (58.31 @22.3K) | 2.92 | 0.04 | [entry](TPU-v5e/tpu-final/RUN5-FLOOR-COLDSTART.md) |

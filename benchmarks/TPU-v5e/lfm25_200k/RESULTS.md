@@ -1,5 +1,59 @@
 # LFM2.5-24B-A2B 200K on TPU v5e-1
 
+## 2026-11-01 18:43 IST: short-context diagnostic — chat template vs raw completion (4096 ctx)
+
+**Model:** `LiquidAI/LFM2.5-24B-A2B` (`Lfm2MoeForCausalLM`), W8A8 backbone + W4A16 MoE, checkpoint `avgrocketman/LFM2.5-24B-A2B-W8A8-W4A16-TPU` (same tree as the 18:06 run).
+**Flags:** `max_model_len=4096`, `max_num_batched_tokens=4096`, `max_num_seqs=1`, `enable_prefix_caching=False`, `trust_remote_code=True`, **no `kv_cache_dtype`** (vLLM resolved `auto`), `LFM_DIAG=1` (paddings `[16, 4096]`), `LFM_CONV_DEBUG=1`. B=1. One short prompt only.
+**Cost/time (MEASURED):** session 18:36:52–18:43:47 IST, 0.10 CU (391.15 → 391.05), under the 0.25 CU cap.
+**Startup (MEASURED):** provision 5.28 s; venv dl/unpack 7.60 / 6.52 s; weights 18.39 s; engine init **277.82 s**; first token (Run B) 318.72 s in-VM / 330.23 s global. HBM 14.732 GiB in use, 14.767 peak, 15.748 limit.
+
+### Runs
+
+| Run | Prompt path | Prompt ids | BOS 124894 | Sampling | Out | Coherent? |
+| :--- | :--- | ---: | ---: | :--- | ---: | :---: |
+| A | `llm.chat`, `add_generation_prompt=True` | 22 (expected) | 1 (expected) | temp 0.1, top_k 50, rep 1.05, 128 | — | **FAILED** |
+| B | `llm.chat`, `add_generation_prompt=True` | 22 | 1 | greedy, rep 1.0, 64 | 64 | **YES** |
+| C | raw `llm.generate` | 12 | 0 | greedy, `ignore_eos`, 64 | 64 | **NO** |
+
+**Run A failure (MEASURED):** `ValueError: JAX does not support per-request seed.` The harness passed `seed=0`, which vLLM's JAX backend rejects. `seed=0` was removed afterwards; **Run A was not rerun**. The 22-token chat prompt and BOS count above are from Run B's actual `prompt_token_ids`.
+
+**Run B (MEASURED, coherent):**
+- prompt first 40: `[124894, 124899, 5922, 207, 89509, 278, 9761, 9896, 302, 5030, 37933, 1003, 309, 29460, 7216, 22, 124900, 207, 124899, 63514, 207, 124901]`
+- out ids (64): `[597, 4695, 20589, 34, 496, 89509, 278, 9761, 9896, 302, 5030, 37933, 1003, 309, 29460, 7216, 2426, 969, 355, 267, 5939, 5439, 22, 1715, 1976, 401, 13816, 302, 5030, 37933, 1003, 61552, 309, 29460, 7216, 22, 27450, 736, 685, 1976, 267, 13999, 302, 5030, 37933, 1003, 9896, 34, 14124, 20, 38847, 20, 5030, 37933, 1003, 11051, 1171, 9418, 20, 28909, 6192, 20, 29460, 6900]`
+- text: `'The user asks: "Explain the fundamental principles of astrophysics and stellar evolution." This is a broad request. They want an explanation of astrophysics fundamentals and stellar evolution. Likely they want a summary of astrophysics principles: physics, astronomy, astrophysics topics like radiation, gravitational forces, stellar formation'`
+- wall 0.592 s.
+
+**Run C (MEASURED, reproduces the bug):**
+- prompt first 40: `[89509, 278, 9761, 9896, 302, 5030, 37933, 1003, 309, 29460, 7216, 22]`
+- out ids (64): `[440, 9761, 9896, 302, 5030, 37933, 1003, 309, 29460, 7216, 437, 278, 9761, 9896, 302, 5030, 29544, 1003, 309, 29460, 7216, 22, 440, 9761, 9896, 302, 5030, 29544, 1003, 309, 29460, 7216, 437, 278, 9761, 9896, 302, 5030, 29544, 1003, 309, 29460, 7216, 22, 440, 9761, 9896, 302, 5030, 29544, 1003, 309, 29460, 7216, 437, 278, 9761, 9896, 302, 5030, 29544, 1003, 309, 29460]`
+- text: `' The fundamental principles of astrophysics and stellar evolution are the fundamental principles of astphysics and stellar evolution. The fundamental principles of astphysics and stellar evolution are the fundamental principles of astphysics and stellar evolution. The fundamental principles of astphysics and stellar evolution are the fundamental principles of astphysics and stellar'`
+- wall 0.376 s.
+
+### CONVDBG (verbatim)
+
+```
+CONVDBG layer=model.layers.0.short_conv kind=prefill slot=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[1])) n=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[])) keep=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bool[])) seq_lens=JitTracer(int32[8]) has_initial_states=missing prev_abs_sum=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bfloat16[]))
+CONVDBG layer=model.layers.0.short_conv kind=decode slot=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[1])) n=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[])) keep=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bool[])) seq_lens=JitTracer(int32[8]) has_initial_states=missing prev_abs_sum=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bfloat16[]))
+CONVDBG layer=model.layers.0.short_conv kind=decode slot=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[1])) n=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[])) keep=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bool[])) seq_lens=JitTracer(int32[8]) has_initial_states=missing prev_abs_sum=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bfloat16[]))
+CONVDBG layer=model.layers.0.short_conv kind=decode slot=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[1])) n=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(int32[])) keep=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bool[])) seq_lens=JitTracer(int32[8]) has_initial_states=missing prev_abs_sum=Tensor(<class 'jax._src.interpreters.partial_eval.DynamicJaxprTracer'> JitTracer(bfloat16[]))
+```
+
+All four lines are emitted during torchax tracing: `slot`, `n`, `keep`, `seq_lens` and `prev_abs_sum` are `JitTracer`/`DynamicJaxprTracer` reprs, not runtime scalars. `has_initial_states=missing` means the metadata object exposed no such attribute at trace time. The three `kind=decode` lines are separate trace invocations classified by the fallback path (`n` unreadable), not three runtime decode steps. `slot` and `n` values are therefore **not measured**; only the code path is.
+
+### Verdict: template/prompt formatting, not conv/state and not the re-quant
+
+- **MEASURED:** B is coherent and C loops with the same weights, engine, conv patch and greedy 64-token budget. The only differences are chat template + BOS (22 ids, BOS 1) vs raw completion (12 ids, BOS 0).
+- **INFERRED:** the `ShortConv` replacement and conv cache work well enough to produce coherent text for 64 decode tokens in B. A conv/state bug is not required to explain C.
+- **INFERRED:** the raw prompt is the trigger; greedy `ignore_eos` then holds the model on the prompt-echo path for 64 tokens. Sampling is not required for coherence: B uses no repetition penalty and is still coherent.
+- **MEASURED:** this run used `kv_cache_dtype=auto` (bf16 KV) and C still looped, so fp8 KV is not the cause.
+- **MEASURED:** the same W8A8/W4A16 checkpoint produces coherent Run B, so a Q4_0 re-quant defect is not supported by this evidence; the llama.cpp GGUF cross-check is not needed on this data.
+- **UNMEASURED:** Run A (card sampling). A corrected Run A is a ~6 min / ~0.10 CU follow-up if wanted.
+
+**Teardown:** TPU session stopped by the driver's `finally:` block. `colab ssh --proxy-mode` auto-created a **CPU** session after teardown (the known gotcha); it was stopped immediately. `colab sessions` empty, balance 391.05, rate 0.00/hr.
+
+---
+
+
 ## 2026-11-01 18:06 IST: rerun after five RCA fixes (fp8 KV fallback)
 
 **Model:** `LiquidAI/LFM2.5-24B-A2B` (`Lfm2MoeForCausalLM`), W8A8 backbone + W4A16 MoE, checkpoint `avgrocketman/LFM2.5-24B-A2B-W8A8-W4A16-TPU` (17 files).

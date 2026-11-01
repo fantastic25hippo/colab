@@ -1,4 +1,4 @@
-import builtins, logging, sys, torch, torch.nn.functional as F
+import builtins, logging, os, sys, torch, torch.nn.functional as F
 
 _PAD_MODULE_NAMES = (
     "tpu_inference.runner.utils",
@@ -80,6 +80,50 @@ def _tpu_xla_short_conv_forward(self, hidden_states: torch.Tensor, output: torch
     new_j = jax_view(updated)
     wctx.kv_caches[idx] = (new_j,) + tuple(raw[1:]) if isinstance(raw, tuple) else new_j
 
+_CONV_DBG = {"layer": None, "prefill": 0, "decode": 0}
+
+def _dbg_repr(x):
+    if x is None: return "none"
+    try:
+        if isinstance(x, torch.Tensor) and x.numel() == 1:
+            return str(x.detach().cpu().item())
+        if isinstance(x, (int, float, bool, str)): return str(x)
+    except Exception: pass
+    s = repr(x)
+    return s if len(s) <= 160 else s[:157] + "..."
+
+def _conv_debug_log(self, slot, n, keep, seq_lens, has_init, prev):
+    # Debug only. Tracing may make values unreadable; nothing here may raise.
+    if os.environ.get("LFM_CONV_DEBUG") != "1": return
+    try:
+        prefix = getattr(self, "prefix", None)
+        if _CONV_DBG["layer"] is None: _CONV_DBG["layer"] = prefix
+        if prefix != _CONV_DBG["layer"]: return
+        n_num = None
+        try:
+            if isinstance(n, torch.Tensor) and n.numel() == 1:
+                n_num = int(n.detach().cpu().item())
+        except Exception: n_num = None
+        if n_num is None: kind = "prefill" if _CONV_DBG["prefill"] == 0 else "decode"
+        else: kind = "prefill" if n_num > 1 else "decode"
+        if kind == "prefill":
+            if _CONV_DBG["prefill"] >= 1: return
+            _CONV_DBG["prefill"] += 1
+        else:
+            if _CONV_DBG["decode"] >= 3: return
+            _CONV_DBG["decode"] += 1
+        try:
+            sl = seq_lens.reshape(-1)[0] if isinstance(seq_lens, torch.Tensor) and seq_lens.numel() else seq_lens
+            sl_s = _dbg_repr(sl)
+        except Exception as e: sl_s = f"error:{type(e).__name__}"
+        try: prev_s = _dbg_repr(prev.abs().sum())
+        except Exception as e: prev_s = f"error:{type(e).__name__}"
+        print(f"CONVDBG layer={prefix} kind={kind} slot={_dbg_repr(slot)} n={_dbg_repr(n)} "
+              f"keep={_dbg_repr(keep)} seq_lens={sl_s} "
+              f"has_initial_states={_dbg_repr(has_init)} prev_abs_sum={prev_s}",
+              flush=True)
+    except Exception: pass
+
 def _lookup_conv_cache(self, state_len, T):
     try:
         from tpu_inference.models.vllm.vllm_model_wrapper_context import get_vllm_model_wrapper_context
@@ -127,6 +171,7 @@ def _lookup_conv_cache(self, state_len, T):
         keep = not_chunk0 if keep is None else (keep & not_chunk0)
     if keep is not None:
         prev = torch.where(keep, prev, zeros)
+    _conv_debug_log(self, slot, n, keep, seq_t, "missing" if has_init is None else has_init, prev)
     return wctx, idx, raw, prev, conv_t, slot, n
 
 _orig_import = builtins.__import__
@@ -135,6 +180,7 @@ def _wrap_paddings(fn):
     def _wrapped(*a, **kw):
         p = fn(*a, **kw)
         if not (isinstance(p, list) and len(p) > 2): return p
+        if os.environ.get("LFM_DIAG") == "1": return [16, 4096]
         max_token_size = kw.get("max_token_size", a[1] if len(a) >= 2 else p[-1])
         return sorted({16, 4096, int(max_token_size)})
     _wrapped._is_pruned = True
