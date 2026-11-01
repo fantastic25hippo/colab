@@ -247,11 +247,12 @@ def _arr_nbytes(arr):
 def _patch_kv_cache_utils(mod):
     fn = getattr(mod, "max_memory_usage_bytes", None)
     if callable(fn) and not getattr(fn, "_bearings_patched", False):
+        orig_fn = getattr(fn, "_bearings_orig", fn)
         def _wrap_max_mem(vllm_config, kv_cache_specs, *a, **kw):
             if os.environ.get("LFM_BEARINGS") != "1":
-                return fn(vllm_config, kv_cache_specs, *a, **kw)
+                return orig_fn(vllm_config, kv_cache_specs, *a, **kw)
             specs = list(kv_cache_specs) if not isinstance(kv_cache_specs, (list, tuple)) else kv_cache_specs
-            res = fn(vllm_config, specs, *a, **kw)
+            res = orig_fn(vllm_config, specs, *a, **kw)
             class_totals = {}
             for s in specs:
                 cname = s.__class__.__name__
@@ -269,37 +270,43 @@ def _patch_kv_cache_utils(mod):
             print(f"[LFM_BEARINGS] grand_total_gib={gtot / (1024**3):.4f} ({gtot} bytes)", flush=True)
             return res
         _wrap_max_mem._bearings_patched = True
+        _wrap_max_mem._bearings_orig = orig_fn
         mod.max_memory_usage_bytes = _wrap_max_mem
 
 def _patch_kv_cache_manager(mod):
     cls = getattr(mod, "KVCacheManager", None)
-    if cls and hasattr(cls, "initialize_kv_cache") and not getattr(cls, "_bearings_init_patched", False):
-        orig_init = cls.initialize_kv_cache
-        def _wrap_init(self, *a, **kw):
-            res = orig_init(self, *a, **kw)
-            if os.environ.get("LFM_BEARINGS") == "1":
-                caches = res if (isinstance(res, (list, tuple)) and len(res) > 0) else None
-                if caches is None: caches = getattr(self, "kv_caches", None)
-                if caches is None and hasattr(self, "runner"):
-                    caches = getattr(self.runner, "kv_caches", None)
-                if caches is None:
-                    try:
-                        from tpu_inference.models.vllm.vllm_model_wrapper_context import get_vllm_model_wrapper_context
-                        caches = getattr(get_vllm_model_wrapper_context(), "kv_caches", None)
-                    except Exception: pass
-                flat = list(_flatten_arrays(caches)) if caches is not None else []
-                tot_b = 0
-                for arr in flat:
-                    shp, dt, nb = getattr(arr, "shape", ()), getattr(arr, "dtype", None), _arr_nbytes(arr)
-                    tot_b += nb
-                    print(f"[LFM_BEARINGS] KV array: shape={shp} dtype={dt} nbytes={nb}", flush=True)
-                print(f"[LFM_BEARINGS] KV total_gib={tot_b / (1024**3):.4f} ({tot_b} bytes)", flush=True)
-                _log_hbm("after KV allocation")
-                if os.environ.get("LFM_BEARINGS_STOP") == "1":
-                    sys.exit(0)
-            return res
-        _wrap_init._bearings_init_patched = True
-        cls.initialize_kv_cache = _wrap_init
+    if cls and hasattr(cls, "initialize_kv_cache"):
+        cur_init = getattr(cls, "initialize_kv_cache")
+        if not getattr(cls, "_bearings_init_patched", False) and not getattr(cur_init, "_bearings_init_patched", False):
+            orig_init = getattr(cls, "_bearings_orig_init", getattr(cur_init, "_bearings_orig_init", cur_init))
+            def _wrap_init(self, *a, **kw):
+                res = orig_init(self, *a, **kw)
+                if os.environ.get("LFM_BEARINGS") == "1":
+                    caches = res if (isinstance(res, (list, tuple)) and len(res) > 0) else None
+                    if caches is None: caches = getattr(self, "kv_caches", None)
+                    if caches is None and hasattr(self, "runner"):
+                        caches = getattr(self.runner, "kv_caches", None)
+                    if caches is None:
+                        try:
+                            from tpu_inference.models.vllm.vllm_model_wrapper_context import get_vllm_model_wrapper_context
+                            caches = getattr(get_vllm_model_wrapper_context(), "kv_caches", None)
+                        except Exception: pass
+                    flat = list(_flatten_arrays(caches)) if caches is not None else []
+                    tot_b = 0
+                    for arr in flat:
+                        shp, dt, nb = getattr(arr, "shape", ()), getattr(arr, "dtype", None), _arr_nbytes(arr)
+                        tot_b += nb
+                        print(f"[LFM_BEARINGS] KV array: shape={shp} dtype={dt} nbytes={nb}", flush=True)
+                    print(f"[LFM_BEARINGS] KV total_gib={tot_b / (1024**3):.4f} ({tot_b} bytes)", flush=True)
+                    _log_hbm("after KV allocation")
+                    if os.environ.get("LFM_BEARINGS_STOP") == "1":
+                        sys.exit(0)
+                return res
+            _wrap_init._bearings_init_patched = True
+            _wrap_init._bearings_orig_init = orig_init
+            cls._bearings_init_patched = True
+            cls._bearings_orig_init = orig_init
+            cls.initialize_kv_cache = _wrap_init
 
 def _patch_vllm_model_wrapper(mod):
     cls = getattr(mod, "VllmModelWrapper", None)
@@ -308,34 +315,43 @@ def _patch_vllm_model_wrapper(mod):
         cls._modules_patched = True
     orig_vgm = getattr(mod, "vllm_get_model", None)
     if callable(orig_vgm) and not getattr(orig_vgm, "_bearings_patched", False):
+        true_vgm = getattr(orig_vgm, "_bearings_orig", orig_vgm)
         def _wrap_vgm(*a, **kw):
-            if os.environ.get("LFM_BEARINGS") != "1": return orig_vgm(*a, **kw)
+            if os.environ.get("LFM_BEARINGS") != "1": return true_vgm(*a, **kw)
             import time; t0 = time.perf_counter()
-            res = orig_vgm(*a, **kw); dur = time.perf_counter() - t0
+            res = true_vgm(*a, **kw); dur = time.perf_counter() - t0
             print(f"[LFM_BEARINGS] load CPU vllm_get_model: dur_s={dur:.4f}s", flush=True)
             return res
         _wrap_vgm._bearings_patched = True
+        _wrap_vgm._bearings_orig = true_vgm
         mod.vllm_get_model = _wrap_vgm
     orig_smt = getattr(mod, "shard_model_to_tpu", None)
     if callable(orig_smt) and not getattr(orig_smt, "_bearings_patched", False):
+        true_smt = getattr(orig_smt, "_bearings_orig", orig_smt)
         def _wrap_smt(*a, **kw):
-            if os.environ.get("LFM_BEARINGS") != "1": return orig_smt(*a, **kw)
+            if os.environ.get("LFM_BEARINGS") != "1": return true_smt(*a, **kw)
             import time; t0 = time.perf_counter()
-            res = orig_smt(*a, **kw); dur = time.perf_counter() - t0
+            res = true_smt(*a, **kw); dur = time.perf_counter() - t0
             cnt = len(res) if hasattr(res, "__len__") else 0
             print(f"[LFM_BEARINGS] load TPU shard_model_to_tpu: dur_s={dur:.4f}s tensors_moved={cnt}", flush=True)
             return res
         _wrap_smt._bearings_patched = True
+        _wrap_smt._bearings_orig = true_smt
         mod.shard_model_to_tpu = _wrap_smt
-    if cls and hasattr(cls, "load_weights") and not getattr(cls, "_bearings_lw_patched", False):
-        orig_lw = cls.load_weights
-        def _wrap_lw(self, *a, **kw):
-            res = orig_lw(self, *a, **kw)
-            if os.environ.get("LFM_BEARINGS") == "1":
-                _log_hbm("after load_weights")
-            return res
-        _wrap_lw._bearings_lw_patched = True
-        cls.load_weights = _wrap_lw
+    if cls and hasattr(cls, "load_weights"):
+        cur_lw = getattr(cls, "load_weights")
+        if not getattr(cls, "_bearings_lw_patched", False) and not getattr(cur_lw, "_bearings_lw_patched", False):
+            orig_lw = getattr(cls, "_bearings_orig_lw", getattr(cur_lw, "_bearings_orig_lw", cur_lw))
+            def _wrap_lw(self, *a, **kw):
+                res = orig_lw(self, *a, **kw)
+                if os.environ.get("LFM_BEARINGS") == "1":
+                    _log_hbm("after load_weights")
+                return res
+            _wrap_lw._bearings_lw_patched = True
+            _wrap_lw._bearings_orig_lw = orig_lw
+            cls._bearings_lw_patched = True
+            cls._bearings_orig_lw = orig_lw
+            cls.load_weights = _wrap_lw
 
 _MOE_BUFFERS, _CURRENT_EXPERT = {}, None
 

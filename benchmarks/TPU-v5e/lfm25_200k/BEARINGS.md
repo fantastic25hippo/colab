@@ -90,7 +90,7 @@ Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192
 | Claim | Expected | Measured | Verdict |
 |---|---|---|---|
 | C1: ShortConv (MambaSpec) counted per block (~8192 B x blocks per layer) | vLLM counts mamba per block across all blocks | Hybrid pad: 57,344 B/block (1x attn 32768 + 3x mamba 8192); Compact-mamba: 30 layers x 9 slots x 8192 B = 0.00 GiB (does not scale with 100K blocks) | CONFIRMED: vLLM pads mamba per block into 57,344 B; TPU compact-mamba uses fixed 9 slots x 8,192 B x 30 layers |
-| C2: KV arrays bf16 last dim 128 | Runtime confirms bf16 x 128 array allocation | No `[LFM_BEARINGS] spec class=` or `KV array:` lines logged due to RecursionError | NOT CONFIRMED at runtime (no KV array log). Page size 32768 B is consistent with bf16 x last dim 128, but arrays unmeasured |
+| C2: KV arrays bf16 last dim 128 | Runtime confirms bf16 x 128 array allocation | Attn: 10 arrays bf16 last dim 128 (shape=(6681, 16, 4, 2, 128), 208.78 MiB each); Mamba: 30 arrays bf16 last dim 2048 (shape=(9, 2, 2048), 72 KiB each); total=2.0409 GiB | CONFIRMED for attention (bf16 x last dim 128); mamba is bf16 last dim 2048 |
 | C3: ~120s load dominated by CPU `vllm_get_model` vs TPU sharding | CPU load ~120s, TPU shard <1s | `vllm_get_model` = 133.9978s; `shard_model_to_tpu` = 0.3473s (608 tensors) | CONFIRMED: 133.9978s CPU vs 0.3473s TPU sharding |
 
 ### 200K KV Projection
@@ -106,6 +106,9 @@ Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192
 - `Compact-mamba KV cache: num_gpu_blocks_override=6681 (attn), _mamba_num_blocks=9 (1 blocks/request). HBM split: attn=10 layers x 6681 blocks x 32768 B = 2.04 GiB; mamba=30 layers x 9 slots x 8192 B = 0.00 GiB; total=2.04 GiB / avail=2.04 GiB.`
 - `Overriding num_gpu_blocks=3821 with num_gpu_blocks_override=6681`
 - `TPU KV cache size: 106,844 tokens, Maximum concurrency for 100,000 tokens per request: 1.07x`
-- `LLM() failed after 169.29s: RecursionError: maximum recursion depth exceeded`
+- `30x [LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728`
+- `10x [LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008`
+- `[LFM_BEARINGS] KV total_gib=2.0409 (2191441920 bytes)`
+- `[LFM_BEARINGS] HBM after KV allocation: used=14.488 GiB (15556598272 B), free=1.260 GiB (1352737792 B)`
 
 

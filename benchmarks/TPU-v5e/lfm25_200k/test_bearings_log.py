@@ -123,6 +123,23 @@ def test_lfm_bearings_stop_raises_system_exit():
     assert "[LFM_BEARINGS] KV total_gib=" in txt
     assert "[LFM_BEARINGS] HBM after KV allocation:" in txt
 
+def test_patch_sys_modules_repeated_no_recursion():
+    kv_mod, mgr, wrap = _setup_mock_modules()
+    for _ in range(50):
+        P.patch_sys_modules()
+    buf = io.StringIO()
+    with mock.patch.dict(os.environ, {"LFM_BEARINGS": "1"}, clear=False):
+        os.environ.pop("LFM_BEARINGS_STOP", None)
+        with contextlib.redirect_stdout(buf):
+            tot = kv_mod.max_memory_usage_bytes(None, [FullAttentionSpec(4096, 8192)])
+            caches = mgr.initialize_kv_cache()
+            out = wrap.load_weights()
+    assert tot == 8192 and len(caches) == 2 and out == {"t1": 1, "t2": 2}
+    txt = buf.getvalue()
+    assert txt.count("[LFM_BEARINGS] HBM after load_weights") == 1
+    assert txt.count("[LFM_BEARINGS] KV total_gib=") == 1
+    assert txt.count("[LFM_BEARINGS] KV array:") == 3
+
 def test_subrunner_wiring_and_no_hf_token():
     here = os.path.dirname(os.path.abspath(__file__))
     subrunner_src = open(os.path.join(here, "lfm25_engine_subrunner.py")).read()
