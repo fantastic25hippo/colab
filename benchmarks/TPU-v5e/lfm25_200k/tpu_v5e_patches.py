@@ -220,11 +220,122 @@ def _install_tpu_runner_warning_filter():
         if not any(isinstance(f, _DropEmptyScheduleFilter) for f in lg.filters):
             lg.addFilter(filt)
 
+def _log_hbm(tag=""):
+    try:
+        import jax
+        m = jax.devices()[0].memory_stats()
+        u = m.get("bytes_in_use", 0)
+        lim = m.get("bytes_limit", 0)
+        free = max(0, lim - u) if lim else 0
+        print(f"[LFM_BEARINGS] HBM {tag}: used={u / (1024**3):.3f} GiB ({u} B), free={free / (1024**3):.3f} GiB ({free} B)", flush=True)
+    except Exception as e:
+        print(f"[LFM_BEARINGS] HBM {tag}: unavailable ({type(e).__name__})", flush=True)
+
+def _flatten_arrays(item):
+    if isinstance(item, (list, tuple)):
+        for x in item: yield from _flatten_arrays(x)
+    elif item is not None: yield item
+
+def _arr_nbytes(arr):
+    nb = getattr(arr, "nbytes", None)
+    if isinstance(nb, int): return nb
+    try:
+        import math
+        return math.prod(arr.shape) * getattr(arr.dtype, "itemsize", 1)
+    except Exception: return 0
+
+def _patch_kv_cache_utils(mod):
+    fn = getattr(mod, "max_memory_usage_bytes", None)
+    if callable(fn) and not getattr(fn, "_bearings_patched", False):
+        def _wrap_max_mem(vllm_config, kv_cache_specs, *a, **kw):
+            if os.environ.get("LFM_BEARINGS") != "1":
+                return fn(vllm_config, kv_cache_specs, *a, **kw)
+            specs = list(kv_cache_specs) if not isinstance(kv_cache_specs, (list, tuple)) else kv_cache_specs
+            res = fn(vllm_config, specs, *a, **kw)
+            class_totals = {}
+            for s in specs:
+                cname = s.__class__.__name__
+                layers = getattr(s, "layers", None)
+                if layers is None: layers = getattr(s, "layer_names", None)
+                lcount = len(layers) if isinstance(layers, (list, tuple, set)) else 1
+                psize = getattr(s, "page_size_bytes", 0)
+                try: msize = s.max_memory_usage_bytes(vllm_config)
+                except Exception: msize = 0
+                print(f"[LFM_BEARINGS] spec class={cname} layers={lcount} page_size_bytes={psize} max_memory_usage_bytes={msize}", flush=True)
+                class_totals[cname] = class_totals.get(cname, 0) + msize
+            for cname, tot in sorted(class_totals.items()):
+                print(f"[LFM_BEARINGS] total class={cname} bytes={tot} gib={tot / (1024**3):.4f}", flush=True)
+            gtot = sum(class_totals.values()) if class_totals else res
+            print(f"[LFM_BEARINGS] grand_total_gib={gtot / (1024**3):.4f} ({gtot} bytes)", flush=True)
+            return res
+        _wrap_max_mem._bearings_patched = True
+        mod.max_memory_usage_bytes = _wrap_max_mem
+
+def _patch_kv_cache_manager(mod):
+    cls = getattr(mod, "KVCacheManager", None)
+    if cls and hasattr(cls, "initialize_kv_cache") and not getattr(cls, "_bearings_init_patched", False):
+        orig_init = cls.initialize_kv_cache
+        def _wrap_init(self, *a, **kw):
+            res = orig_init(self, *a, **kw)
+            if os.environ.get("LFM_BEARINGS") == "1":
+                caches = res if (isinstance(res, (list, tuple)) and len(res) > 0) else None
+                if caches is None: caches = getattr(self, "kv_caches", None)
+                if caches is None and hasattr(self, "runner"):
+                    caches = getattr(self.runner, "kv_caches", None)
+                if caches is None:
+                    try:
+                        from tpu_inference.models.vllm.vllm_model_wrapper_context import get_vllm_model_wrapper_context
+                        caches = getattr(get_vllm_model_wrapper_context(), "kv_caches", None)
+                    except Exception: pass
+                flat = list(_flatten_arrays(caches)) if caches is not None else []
+                tot_b = 0
+                for arr in flat:
+                    shp, dt, nb = getattr(arr, "shape", ()), getattr(arr, "dtype", None), _arr_nbytes(arr)
+                    tot_b += nb
+                    print(f"[LFM_BEARINGS] KV array: shape={shp} dtype={dt} nbytes={nb}", flush=True)
+                print(f"[LFM_BEARINGS] KV total_gib={tot_b / (1024**3):.4f} ({tot_b} bytes)", flush=True)
+                _log_hbm("after KV allocation")
+                if os.environ.get("LFM_BEARINGS_STOP") == "1":
+                    sys.exit(0)
+            return res
+        _wrap_init._bearings_init_patched = True
+        cls.initialize_kv_cache = _wrap_init
+
 def _patch_vllm_model_wrapper(mod):
     cls = getattr(mod, "VllmModelWrapper", None)
-    if cls is None or getattr(cls, "_modules_patched", False): return
-    cls.modules = lambda self: self.model.modules() if getattr(self, "model", None) is not None else iter(())
-    cls._modules_patched = True
+    if cls and not getattr(cls, "_modules_patched", False):
+        cls.modules = lambda self: self.model.modules() if getattr(self, "model", None) is not None else iter(())
+        cls._modules_patched = True
+    orig_vgm = getattr(mod, "vllm_get_model", None)
+    if callable(orig_vgm) and not getattr(orig_vgm, "_bearings_patched", False):
+        def _wrap_vgm(*a, **kw):
+            if os.environ.get("LFM_BEARINGS") != "1": return orig_vgm(*a, **kw)
+            import time; t0 = time.perf_counter()
+            res = orig_vgm(*a, **kw); dur = time.perf_counter() - t0
+            print(f"[LFM_BEARINGS] load CPU vllm_get_model: dur_s={dur:.4f}s", flush=True)
+            return res
+        _wrap_vgm._bearings_patched = True
+        mod.vllm_get_model = _wrap_vgm
+    orig_smt = getattr(mod, "shard_model_to_tpu", None)
+    if callable(orig_smt) and not getattr(orig_smt, "_bearings_patched", False):
+        def _wrap_smt(*a, **kw):
+            if os.environ.get("LFM_BEARINGS") != "1": return orig_smt(*a, **kw)
+            import time; t0 = time.perf_counter()
+            res = orig_smt(*a, **kw); dur = time.perf_counter() - t0
+            cnt = len(res) if hasattr(res, "__len__") else 0
+            print(f"[LFM_BEARINGS] load TPU shard_model_to_tpu: dur_s={dur:.4f}s tensors_moved={cnt}", flush=True)
+            return res
+        _wrap_smt._bearings_patched = True
+        mod.shard_model_to_tpu = _wrap_smt
+    if cls and hasattr(cls, "load_weights") and not getattr(cls, "_bearings_lw_patched", False):
+        orig_lw = cls.load_weights
+        def _wrap_lw(self, *a, **kw):
+            res = orig_lw(self, *a, **kw)
+            if os.environ.get("LFM_BEARINGS") == "1":
+                _log_hbm("after load_weights")
+            return res
+        _wrap_lw._bearings_lw_patched = True
+        cls.load_weights = _wrap_lw
 
 _MOE_BUFFERS, _CURRENT_EXPERT = {}, None
 
@@ -308,8 +419,12 @@ def _patch_loaded_module(name, mod):
         cls = getattr(mod, "ShortConv", None)
         if cls and cls.forward is not _tpu_xla_short_conv_forward:
             cls.forward = _tpu_xla_short_conv_forward
-    if name.endswith("vllm_model_wrapper") and "context" not in name:
+    if (name.endswith("vllm_model_wrapper") or hasattr(mod, "VllmModelWrapper")) and "context" not in name:
         _patch_vllm_model_wrapper(mod)
+    if hasattr(mod, "max_memory_usage_bytes"):
+        _patch_kv_cache_utils(mod)
+    if hasattr(mod, "KVCacheManager"):
+        _patch_kv_cache_manager(mod)
     if "tpu_platform" in name:
         fn_s = getattr(mod, "supports_kv_cache_dtype", None)
         if callable(fn_s) and not getattr(fn_s, "_is_dtype_patched", False):
@@ -344,7 +459,7 @@ def patch_sys_modules():
     # from tpu_inference.runner import utils returns the parent; patch via sys.modules.
     # Leave jax.clear_caches live so weight-load JIT is freed before the KV alloc.
     for m_name, m in list(sys.modules.items()):
-        if m and isinstance(m_name, str) and (m_name.startswith("tpu_inference") or "short_conv" in m_name or m_name.endswith("vllm_model_wrapper")):
+        if m and isinstance(m_name, str) and (m_name.startswith("tpu_inference") or "short_conv" in m_name or m_name.endswith("vllm_model_wrapper") or "kv_cache" in m_name):
             _patch_loaded_module(m_name, m)
     _patch_padding_modules()
 

@@ -18,6 +18,7 @@ os.environ.update({
     "JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS": "0",
     "JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES": "-1",
     "JAX_PERSISTENT_CACHE_ENABLE_XLA_CACHES": "all",
+    "SKIP_JAX_PRECOMPILE": "1",
 })
 os.makedirs("/dev/shm/tpu_compile_cache", exist_ok=True)
 
