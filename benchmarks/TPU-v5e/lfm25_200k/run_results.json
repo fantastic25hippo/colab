@@ -1,47 +1,83 @@
 {
-  "t_remount_s": 0.05,
-  "venv_and_cache_prep": {
-    "dl_s": 9.59,
-    "unpack_s": 6.42,
-    "total_s": 16.0
+  "date_ist": "2026-11-01 18:06",
+  "model": "LiquidAI/LFM2.5-24B-A2B",
+  "checkpoint": "avgrocketman/LFM2.5-24B-A2B-W8A8-W4A16-TPU",
+  "flags": {
+    "max_model_len": 200000,
+    "max_num_seqs": 1,
+    "max_num_batched_tokens": 8192,
+    "gpu_memory_utilization": 0.92,
+    "enable_prefix_caching": false,
+    "temperature": 0.0,
+    "batch_size": 1
   },
-  "weights_dl_s": 11.6,
-  "in_vm_cold_start_to_first_token_s": 310.91,
-  "total_cold_start_to_first_token_s": 320.99,
+  "kv_cache_dtype": "fp8",
+  "kv_cache_dtype_note": "plain int8 rejected at startup by vLLM 0.32.0 CacheConfig (pydantic literal_error); fp8 used per instruction",
+  "fixes_present": [
+    "conv-cache metadata/has_initial_states",
+    "tpu_runner warning filter",
+    "kv_cache_dtype int8 (rejected, fp8 fallback)",
+    "[16, 4096, max_token_size] paddings + JAX persistent cache env",
+    "VllmModelWrapper.modules"
+  ],
+  "checks": {
+    "short_sample_coherent": false,
+    "should_not_schedule_warning_gone": true,
+    "atexit_modules_attributeerror_gone": true,
+    "engine_init_below_269_29s": false,
+    "ttft_200k_below_32_578s": true
+  },
+  "cu": {
+    "balance_before": 391.46,
+    "balance_after": 391.15,
+    "used": 0.31,
+    "rate_after_stop_hr": 0.0
+  },
+  "session_stopped": true,
+  "sessions_empty": true,
+  "t_remount_s": 0.06,
+  "venv_and_cache_prep": {
+    "dl_s": 3.04,
+    "unpack_s": 6.48,
+    "total_s": 9.52
+  },
+  "weights_dl_s": 10.81,
+  "in_vm_cold_start_to_first_token_s": 425.1,
+  "total_cold_start_to_first_token_s": 435.63,
   "engine": {
-    "init_s": 269.29,
-    "first_token_ts": 1793462685.1936023,
-    "ttft_short_s": 0.1528,
-    "decode_tok_s": 170.26,
-    "sample_output": " The fundamental principles of astphysics and stellar evolution are the fundamental principles of astphysics and stellar evolution. The fundamental principles of astphysics and stellar evolution are t",
+    "init_s": 388.73,
+    "first_token_ts": 1793536491.2963517,
+    "ttft_short_s": 0.1605,
+    "decode_tok_s": 165.91,
+    "sample_output": " The fundamental principles of astphys and astphys are the fundamental principles of astphys and astphys. The fundamental principles of astphys and astphys are the fundamental principles of astphys an",
     "context_evals": {
       "32768": {
         "prompt_len": 32704,
-        "ttft_s": 2.342,
-        "decode_tok_s": 23.87,
+        "ttft_s": 2.3433,
+        "decode_tok_s": 23.81,
         "hbm": {
-          "in_use_gib": 14.738,
-          "peak_gib": 14.821,
+          "in_use_gib": 14.736,
+          "peak_gib": 14.819,
           "limit_gib": 15.748
         }
       },
       "200000": {
         "prompt_len": 199936,
-        "ttft_s": 32.5779,
-        "decode_tok_s": 1.93,
+        "ttft_s": 32.3805,
+        "decode_tok_s": 1.94,
         "hbm": {
-          "in_use_gib": 14.738,
-          "peak_gib": 14.821,
+          "in_use_gib": 14.97,
+          "peak_gib": 15.053,
           "limit_gib": 15.748
         }
       }
     },
     "hbm_stats": {
-      "in_use_gib": 14.738,
-      "peak_gib": 14.821,
+      "in_use_gib": 14.97,
+      "peak_gib": 15.053,
       "limit_gib": 15.748
     },
-    "tar_cache_s": 0.1
+    "tar_cache_s": 0.15
   },
-  "vm_provision_s": 4.77
+  "vm_provision_s": 5.23
 }

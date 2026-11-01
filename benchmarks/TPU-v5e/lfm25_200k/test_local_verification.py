@@ -242,8 +242,9 @@ def test_subrunner_int8_kv_and_jax_cache_env():
     print("[TEST 8] Verifying int8 KV flag and JAX persistent cache env...", end=" ")
     here = os.path.dirname(os.path.abspath(__file__))
     src = open(os.path.join(here, "lfm25_engine_subrunner.py")).read()
-    assert 'kv_cache_dtype="int8"' in src
-    assert 'kv_cache_dtype="fp8"' not in src
+    # 2026-11-01: vLLM rejected "int8"; fp8 is the documented fallback.
+    assert 'kv_cache_dtype="fp8"' in src
+    assert 'rejected "int8"' in src
     assert 'JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES": "-1"' in src
     assert 'JAX_PERSISTENT_CACHE_ENABLE_XLA_CACHES": "all"' in src
     print("PASS")

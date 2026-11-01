@@ -49,12 +49,11 @@ def get_hbm():
 
 t_eng0 = time.time()
 model_path = "/dev/shm/lfm25_200k"
-# TODO(tpu-v5e): v5e has no native FP8. vLLM 0.32.0 CacheDType has no plain
-# "int8" (only "int8_per_token_head"). If LLM() rejects this string, extend
-# the allowed cache dtypes; do not silently fall back to fp8/float8_e4m3fn.
+# 2026-11-01: vLLM 0.32.0 CacheConfig rejected "int8" at startup (allowed:
+# auto/fp8/int8_per_token_head/...). Fall back to fp8 as instructed.
 llm = LLM(
     model=model_path, max_model_len=200000, max_num_seqs=1,
-    max_num_batched_tokens=8192, kv_cache_dtype="int8",
+    max_num_batched_tokens=8192, kv_cache_dtype="fp8",
     gpu_memory_utilization=0.92, enable_prefix_caching=False,
     trust_remote_code=True
 )
