@@ -76,3 +76,36 @@ if envs.SKIP_JAX_PRECOMPILE or self.runner.model_config.enforce_eager:
     return
 ```
 
+## Part 2: Live TPU Measurements & Claims Verification
+
+Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192]`, `LFM_BEARINGS=1 STOP=1`, `SKIP_JAX_PRECOMPILE=1`, `FORCE_COLD`, `NO_UPLOAD`.
+
+### Phase Timings & Host Wall
+- Provision: 4.61s; weights_dl: 11.50s (9 shards, 13125.7 MB @ 1141.7 MB/s); venv_dl: 4.86s; venv_unpack: 7.75s; TPU init: 16.09s
+- CPU `vllm_get_model`: 133.9978s; TPU `shard_model_to_tpu`: 0.3473s (608 tensors moved); storage-to-TPU total: 134.35s
+- `weight_load`: 136.87s; `llm_init`: 169.29s; host wall: 226.8s (CU 390.83 -> 390.65, cache_publish=null)
+- HBM after load: used = 12.447 GiB (13,365,066,752 B), free = 3.301 GiB (3,544,269,312 B), limit = 15.75 GiB
+
+### Claims Verification Table
+| Claim | Expected | Measured | Verdict |
+|---|---|---|---|
+| C1: ShortConv (MambaSpec) counted per block (~8192 B x blocks per layer) | vLLM counts mamba per block across all blocks | Hybrid pad: 57,344 B/block (1x attn 32768 + 3x mamba 8192); Compact-mamba: 30 layers x 9 slots x 8192 B = 0.00 GiB (does not scale with 100K blocks) | CONFIRMED: vLLM pads mamba per block into 57,344 B; TPU compact-mamba uses fixed 9 slots x 8,192 B x 30 layers |
+| C2: KV arrays bf16 last dim 128 | Runtime confirms bf16 x 128 array allocation | No `[LFM_BEARINGS] spec class=` or `KV array:` lines logged due to RecursionError | NOT CONFIRMED at runtime (no KV array log). Page size 32768 B is consistent with bf16 x last dim 128, but arrays unmeasured |
+| C3: ~120s load dominated by CPU `vllm_get_model` vs TPU sharding | CPU load ~120s, TPU shard <1s | `vllm_get_model` = 133.9978s; `shard_model_to_tpu` = 0.3473s (608 tensors) | CONFIRMED: 133.9978s CPU vs 0.3473s TPU sharding |
+
+### 200K KV Projection
+- WITH overcount (prior 200K run1): 6.68 GiB needed vs 3.57 GiB free (OOM).
+- WITHOUT overcount (scaled compact-mamba): attn 10 layers * (200,000 / 16) * 32,768 B = 3.81 GiB + mamba (30 * 9 * 8,192 B = 2.11 MiB) = ~3.82 GiB vs 3.301 GiB free HBM.
+
+### Log Citations
+- `[LFM_BEARINGS] load CPU vllm_get_model: dur_s=133.9978s`
+- `[LFM_BEARINGS] load TPU shard_model_to_tpu: dur_s=0.3473s tensors_moved=608`
+- `Total time to load model weights from storage to TPU: 134.35 seconds.`
+- `[LFM_BEARINGS] HBM after load_weights: used=12.447 GiB (13365066752 B), free=3.301 GiB (3544269312 B)`
+- `Hybrid KV cache: padding every layer spec to 57344 bytes (num_attn_groups=1 × attn_page=32768 + num_mamba_groups=3 × mamba_unpadded=8192).`
+- `Compact-mamba KV cache: num_gpu_blocks_override=6681 (attn), _mamba_num_blocks=9 (1 blocks/request). HBM split: attn=10 layers x 6681 blocks x 32768 B = 2.04 GiB; mamba=30 layers x 9 slots x 8192 B = 0.00 GiB; total=2.04 GiB / avail=2.04 GiB.`
+- `Overriding num_gpu_blocks=3821 with num_gpu_blocks_override=6681`
+- `TPU KV cache size: 106,844 tokens, Maximum concurrency for 100,000 tokens per request: 1.07x`
+- `LLM() failed after 169.29s: RecursionError: maximum recursion depth exceeded`
+
+
