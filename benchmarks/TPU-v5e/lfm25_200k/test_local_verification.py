@@ -125,7 +125,7 @@ def test_sys_modules_hook_and_sd_layout():
     for mod in (utils, runner, comp, wu, km): sys.modules[mod.__name__] = mod
     try:
         patch_sys_modules()
-        want = [16, 4096, 8192]
+        want = [16, 8192]
         assert utils.get_token_paddings() == want
         assert runner.get_token_paddings() == want
         assert comp.get_token_paddings() == want
@@ -250,6 +250,16 @@ def test_subrunner_default_kv_and_jax_cache_env():
     assert "max_tokens=1" in src
     print("PASS")
 
+def test_stack_expert_group_dim0():
+    print("[TEST 9] Verifying stack_expert_group stacks 4 expert tensors on dim 0...", end=" ")
+    from tpu_v5e_patches import stack_expert_group
+    fake_tensors = [torch.randn(4, 8) for _ in range(4)]
+    stacked = stack_expert_group(fake_tensors, dim=0)
+    assert stacked.shape == (4, 4, 8)
+    for i in range(4):
+        assert torch.equal(stacked[i], fake_tensors[i])
+    print("PASS")
+
 if __name__ == "__main__":
     t0 = time.time()
     test_trap2_split_plane_q4_0()
@@ -260,5 +270,6 @@ if __name__ == "__main__":
     test_lookup_conv_cache_metadata_slot_n_and_mask()
     test_tpu_runner_warning_filter_and_wrapper_modules()
     test_subrunner_default_kv_and_jax_cache_env()
-    print(f"All 8 verification test suites passed in {time.time() - t0:.2f}s!")
+    test_stack_expert_group_dim0()
+    print(f"All 9 verification test suites passed in {time.time() - t0:.2f}s!")
 

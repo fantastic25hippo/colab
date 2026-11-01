@@ -28,7 +28,7 @@ from lfm25_cache import dir_stats
 # Any change here changes the XLA program set; the driver hashes this line into
 # the compile-cache filename. kv=auto is vLLM's default (bf16 KV).
 CACHE_KEY_ARGS = ("max_model_len=200000;max_num_seqs=1;max_num_batched_tokens=8192;"
-                  "gpu_memory_utilization=0.92;prefix_caching=0;kv=auto;buckets=16|4096|8192")
+                  "gpu_memory_utilization=0.92;prefix_caching=0;kv=auto;buckets=16|8192")
 
 def log_sub(m):
     msg = f"[LFM25_SUBRUNNER {time.strftime('%H:%M:%S')}] {m}"
@@ -104,7 +104,7 @@ if phases["weight_load_s"] is not None and phases["compile_warmup_s"] is not Non
 base = {"ok": err is None, "init_s": round(init_dur, 2), "phases": phases,
         "engine_args": {"max_model_len": 200000, "max_num_seqs": 1, "max_num_batched_tokens": 8192,
                         "gpu_memory_utilization": 0.92, "enable_prefix_caching": False,
-                        "kv_cache_dtype": "auto (vLLM default, bf16)", "buckets": [16, 4096, 8192]},
+                        "kv_cache_dtype": "auto (vLLM default, bf16)", "buckets": [16, 8192]},
         "cache": {"before": cache_before, "after": cache_after,
                   "new_entries": cache_after["entries"] - cache_before["entries"]},
         "hbm_after_init": get_hbm()}
@@ -141,6 +141,7 @@ def _prompt_ids(out, fallback):
         return list(fallback)
 
 short, chat_txt, decode_tok_s, first_tok_ts = {}, "", None, None
+context_evals = {}
 try:
     t0 = time.perf_counter()
     o = llm.chat(msgs, sp_ttft, add_generation_prompt=True)
@@ -155,6 +156,8 @@ except Exception as e:
     short["ttft_error"] = f"{type(e).__name__}: {e}"
     log_sub(f"Short TTFT FAILED: {short['ttft_error']}")
 
+GOLDEN_B_PREFIX = [597, 4695, 20589, 34, 496, 89509, 278, 9761, 9896, 302, 5030, 37933, 1003]
+golden_ok = True
 try:
     t0 = time.perf_counter()
     chat_out = llm.chat(msgs, sp_chat, add_generation_prompt=True)
@@ -166,56 +169,72 @@ try:
                      "prompt_bos": check_prompt_ids(_cids) if _cids else None,
                      "out_ids": chat_ids_out, "text": chat_txt, "ignore_eos": False}
     log_sub(f"Chat 64 tok: {chat_wall:.3f}s; ids={chat_ids_out}; text={chat_txt!r}")
+    if len(chat_ids_out) < len(GOLDEN_B_PREFIX):
+        log_sub(f"Golden mismatch: output length {len(chat_ids_out)} < {len(GOLDEN_B_PREFIX)}")
+        golden_ok = False
+    else:
+        for idx_g, (got_id, want_id) in enumerate(zip(chat_ids_out, GOLDEN_B_PREFIX)):
+            if got_id != want_id:
+                log_sub(f"Golden mismatch at idx={idx_g}: got={got_id} want={want_id}")
+                golden_ok = False
+                break
+    if not golden_ok:
+        base["ok"] = False
 except Exception as e:
     short["chat"] = {"error": f"{type(e).__name__}: {e}"}
     log_sub(f"Chat 64 tok FAILED: {short['chat']['error']}")
+    golden_ok = False
+    base["ok"] = False
 
-try:
-    t0 = time.perf_counter()
-    dec_out = llm.chat(msgs, sp_dec, add_generation_prompt=True)
-    dec_wall = time.perf_counter() - t0
-    decode_tok_s = 64.0 / max(1e-6, dec_wall)
-    short["decode"] = {"wall_s": round(dec_wall, 4), "tok_s": round(decode_tok_s, 2),
-                       "tok_s_excl_prefill": round(63.0 / max(1e-6, dec_wall - short.get("ttft_s", 0)), 2),
-                       "n_out": len(_out_ids(dec_out)), "ignore_eos": True,
-                       "note": "ignore_eos=True: throughput timing only, text not judged; "
-                               "tok_s=64/wall, tok_s_excl_prefill=63/(wall-ttft)"}
-    log_sub(f"Decode 64 tok (ignore_eos): {dec_wall:.4f}s ({decode_tok_s:.2f} tok/s)")
-except Exception as e:
-    short["decode"] = {"error": f"{type(e).__name__}: {e}"}
-    log_sub(f"Decode 64 tok FAILED: {short['decode']['error']}")
-
-context_evals = {}
-tok = llm.get_tokenizer()
-filler = filler_text(tok, p_short + " ", 200000)
-for target_ctx in [32768, 200000]:
-    target = target_ctx - 64
+if not golden_ok:
+    log_sub("Golden gate failed; skipping remaining evals")
+else:
     try:
-        ids, meta = build_long_prompt_ids(tok, filler, target)
-        bos = check_prompt_ids(ids)
-        p_input = {"prompt_token_ids": ids}
         t0 = time.perf_counter()
-        o_ctx = llm.generate(p_input, sp_ttft)
-        ttft_ctx = time.perf_counter() - t0
-        t0 = time.perf_counter()
-        o_dec = llm.generate(p_input, sp_dec)
-        t_dec = time.perf_counter() - t0
-        hbm_now = get_hbm()
-        echo = _prompt_ids(o_ctx, ids)
-        log_sub(f"Context {target_ctx} (p={len(ids)}, bos={bos}, echo_bos={echo.count(BOS_ID)}, "
-                f"decode ignore_eos=True): TTFT={ttft_ctx:.4f}s, "
-                f"Decode={64.0/max(1e-6, t_dec):.2f} tok/s, HBM={hbm_now}")
-        context_evals[str(target_ctx)] = {
-            "prompt_len": len(ids), "ttft_s": round(ttft_ctx, 4),
-            "decode_tok_s": round(64.0/max(1e-6, t_dec), 2), "decode_wall_s": round(t_dec, 4),
-            "decode_tok_s_excl_prefill": round(63.0/max(1e-6, t_dec - ttft_ctx), 2),
-            "prompt_bos_count": bos, "engine_prompt_bos_count": echo.count(BOS_ID),
-            "prompt_ids_first40": ids[:40], "n_out_decode": len(_out_ids(o_dec)),
-            "build": meta, "hbm": hbm_now}
+        dec_out = llm.chat(msgs, sp_dec, add_generation_prompt=True)
+        dec_wall = time.perf_counter() - t0
+        decode_tok_s = 64.0 / max(1e-6, dec_wall)
+        short["decode"] = {"wall_s": round(dec_wall, 4), "tok_s": round(decode_tok_s, 2),
+                           "tok_s_excl_prefill": round(63.0 / max(1e-6, dec_wall - short.get("ttft_s", 0)), 2),
+                           "n_out": len(_out_ids(dec_out)), "ignore_eos": True,
+                           "note": "ignore_eos=True: throughput timing only, text not judged; "
+                                   "tok_s=64/wall, tok_s_excl_prefill=63/(wall-ttft)"}
+        log_sub(f"Decode 64 tok (ignore_eos): {dec_wall:.4f}s ({decode_tok_s:.2f} tok/s)")
     except Exception as e:
-        context_evals[str(target_ctx)] = {"prompt_len": target,
-                                          "error": f"{type(e).__name__}: {e}", "hbm": get_hbm()}
-        log_sub(f"Context {target_ctx} FAILED: {context_evals[str(target_ctx)]['error']}")
+        short["decode"] = {"error": f"{type(e).__name__}: {e}"}
+        log_sub(f"Decode 64 tok FAILED: {short['decode']['error']}")
+
+    context_evals = {}
+    tok = llm.get_tokenizer()
+    filler = filler_text(tok, p_short + " ", 200000)
+    for target_ctx in [32768, 200000]:
+        target = target_ctx - 64
+        try:
+            ids, meta = build_long_prompt_ids(tok, filler, target)
+            bos = check_prompt_ids(ids)
+            p_input = {"prompt_token_ids": ids}
+            t0 = time.perf_counter()
+            o_ctx = llm.generate(p_input, sp_ttft)
+            ttft_ctx = time.perf_counter() - t0
+            t0 = time.perf_counter()
+            o_dec = llm.generate(p_input, sp_dec)
+            t_dec = time.perf_counter() - t0
+            hbm_now = get_hbm()
+            echo = _prompt_ids(o_ctx, ids)
+            log_sub(f"Context {target_ctx} (p={len(ids)}, bos={bos}, echo_bos={echo.count(BOS_ID)}, "
+                    f"decode ignore_eos=True): TTFT={ttft_ctx:.4f}s, "
+                    f"Decode={64.0/max(1e-6, t_dec):.2f} tok/s, HBM={hbm_now}")
+            context_evals[str(target_ctx)] = {
+                "prompt_len": len(ids), "ttft_s": round(ttft_ctx, 4),
+                "decode_tok_s": round(64.0/max(1e-6, t_dec), 2), "decode_wall_s": round(t_dec, 4),
+                "decode_tok_s_excl_prefill": round(63.0/max(1e-6, t_dec - ttft_ctx), 2),
+                "prompt_bos_count": bos, "engine_prompt_bos_count": echo.count(BOS_ID),
+                "prompt_ids_first40": ids[:40], "n_out_decode": len(_out_ids(o_dec)),
+                "build": meta, "hbm": hbm_now}
+        except Exception as e:
+            context_evals[str(target_ctx)] = {"prompt_len": target,
+                                              "error": f"{type(e).__name__}: {e}", "hbm": get_hbm()}
+            log_sub(f"Context {target_ctx} FAILED: {context_evals[str(target_ctx)]['error']}")
 
 results = dict(base, first_token_ts=first_tok_ts, ttft_short_s=short.get("ttft_s"),
                decode_tok_s=None if decode_tok_s is None else round(decode_tok_s, 2),
@@ -223,7 +242,7 @@ results = dict(base, first_token_ts=first_tok_ts, ttft_short_s=short.get("ttft_s
                short=short, context_evals=context_evals, hbm_stats=get_hbm(),
                log_timeline=timeline.rows, notes=[
                    "all prompts use the tokenizer chat template (add_generation_prompt=True)",
-                   "short chat prompt is 22 ids -> pads to the 4096 bucket; the 2026-11-01 18:06 run used the raw 12-id prompt (bucket 16)",
+                   "short chat prompt is 22 ids -> pads to the 8192 bucket; the 2026-11-01 18:06 run used the raw 12-id prompt (bucket 16)",
                    "chat coherence run: greedy, max_tokens=64, no ignore_eos/min_tokens/seed",
                    "64-token decode runs set ignore_eos=True: throughput timing only, text not judged",
                    "kv_cache_dtype is vLLM's default (auto); fp8 is not enabled"])

@@ -40,43 +40,37 @@ def test_long_prompt_rejects_short_filler_and_bad_bos():
     tok = StubTok()
     for bad in ([1, 2, 3], [BOS_ID, BOS_ID, 5]):
         try:
-            check_prompt_ids(bad)
-            raise AssertionError(f"check_prompt_ids accepted {bad}")
-        except AssertionError as e:
-            assert "BOS" in str(e), e
+            check_prompt_ids(bad); raise AssertionError(f"accepted {bad}")
+        except AssertionError as e: assert "BOS" in str(e), e
     try:
-        check_prompt_ids([BOS_ID, 5], target=3)
-        raise AssertionError("accepted wrong length")
-    except AssertionError as e:
-        assert "expected 3" in str(e), e
+        check_prompt_ids([BOS_ID, 5], target=3); raise AssertionError("wrong length")
+    except AssertionError as e: assert "expected 3" in str(e), e
     try:
-        build_long_prompt_ids(tok, "tiny", 100000)
-        raise AssertionError("accepted filler shorter than target")
-    except ValueError as e:
-        assert "need >=" in str(e), e
+        build_long_prompt_ids(tok, "tiny", 100000); raise AssertionError("short filler")
+    except ValueError as e: assert "need >=" in str(e), e
     print("PASS")
 
 
 def test_cache_filename_key():
     print("[TEST C] cache filename: version + args + patches hash...", end=" ")
-    a = cache_filename("0.32.0", "max_model_len=200000", "abc123")
-    assert re.fullmatch(r"tpu_compile_cache__lfm2\.5-24b-a2b__vllm0\.32\.0__len200000__b16-4096-200000__[0-9a-f]{8}\.tar", a), a
-    assert a == cache_filename("0.32.0", "max_model_len=200000", "abc123")
-    assert a != cache_filename("0.32.1", "max_model_len=200000", "abc123")
-    assert a != cache_filename("0.32.0", "max_model_len=200000;kv=auto", "abc123")
-    assert a != cache_filename("0.32.0", "max_model_len=200000", "abc124")
+    a = cache_filename("0.32.0", "max_model_len=200000", "abc123", buckets="16-8192")
+    assert re.fullmatch(r"tpu_compile_cache__lfm2\.5-24b-a2b__vllm0\.32\.0__len200000__b16-8192__[0-9a-f]{8}\.tar", a), a
+    assert a == cache_filename("0.32.0", "max_model_len=200000", "abc123", buckets="16-8192")
+    assert a != cache_filename("0.32.1", "max_model_len=200000", "abc123", buckets="16-8192")
+    assert a != cache_filename("0.32.0", "max_model_len=200000;kv=auto", "abc123", buckets="16-8192")
+    assert a != cache_filename("0.32.0", "max_model_len=200000", "abc124", buckets="16-8192")
     assert "b1_32k" not in a
     print("PASS")
 
 
 def test_extract_cache_key_args():
     print("[TEST D] CACHE_KEY_ARGS extraction from source text...", end=" ")
-    src = 'CACHE_KEY_ARGS = ("max_model_len=200000;"\n                  "kv=auto;buckets=16|4096|8192")\n'
-    assert extract_cache_key_args(src) == "max_model_len=200000;kv=auto;buckets=16|4096|8192"
+    src = 'CACHE_KEY_ARGS = ("max_model_len=200000;"\n                  "kv=auto;buckets=16|8192")\n'
+    assert extract_cache_key_args(src) == "max_model_len=200000;kv=auto;buckets=16|8192"
     assert extract_cache_key_args("no constant here") == ""
     real = open(os.path.join(HERE, "lfm25_engine_subrunner.py")).read()
     got = extract_cache_key_args(real)
-    assert "max_model_len=200000" in got and "kv=auto" in got and "buckets=16|4096|8192" in got, got
+    assert "max_model_len=200000" in got and "kv=auto" in got and "buckets=16|8192" in got, got
     print("PASS")
 
 
@@ -117,6 +111,28 @@ def test_static_wiring():
     print("PASS")
 
 
+def test_moe_stacking():
+    print("[TEST G] MoE 64 experts buffer and single put...", end=" ")
+    import types, tpu_v5e_patches as P, numpy as np
+    put_calls, mod = [], types.ModuleType("tpu_inference.runner.utils")
+    def mock_put(t, *a, **kw):
+        put_calls.append(t); return t
+    mod.general_device_put = mock_put; sys.modules[mod.__name__] = mod
+    P._patch_loaded_module("tpu_inference.runner.utils", mod)
+    put_fn = mod.general_device_put; P._MOE_BUFFERS.clear()
+    fake = [np.arange(8) + i for i in range(64)]
+    stacked = P.stack_expert_group(fake, dim=0); outs = []
+    for i in range(64):
+        P._CURRENT_EXPERT = (5, "w1", i); outs.append(put_fn(fake[i]))
+    assert len(put_calls) == 1, f"Expected 1 put, got {len(put_calls)}"
+    assert all(np.array_equal(outs[i], stacked[i]) for i in range(64))
+    for i in range(64):
+        P._CURRENT_EXPERT = (5, "w1", i); assert np.array_equal(put_fn(fake[i]), stacked[i])
+    assert len(put_calls) == 1
+    P._CURRENT_EXPERT = None; sys.modules.pop(mod.__name__, None)
+    print("PASS")
+
+
 if __name__ == "__main__":
     test_long_prompt_exact_len_and_single_bos()
     test_long_prompt_rejects_short_filler_and_bad_bos()
@@ -124,4 +140,5 @@ if __name__ == "__main__":
     test_extract_cache_key_args()
     test_timeline_summary()
     test_static_wiring()
-    print("All 6 startup/template test suites passed!")
+    test_moe_stacking()
+    print("All 7 startup/template test suites passed!")

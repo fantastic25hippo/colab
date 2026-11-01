@@ -1,4 +1,8 @@
-import builtins, logging, os, sys, torch, torch.nn.functional as F
+import builtins, logging, os, re, sys
+try: import torch, torch.nn.functional as F
+except Exception:
+    import types; torch = types.ModuleType("torch"); torch.Tensor = type("Tensor", (), {})
+    F = types.ModuleType("torch.nn.functional"); torch.nn = types.ModuleType("torch.nn"); torch.nn.functional = F
 
 try:
     from lfm25_startup import install_phase_hooks
@@ -44,7 +48,7 @@ def sd_causal_conv(bx, weight, bias, state):
     return acc, x_ext
 
 def _as_torch(x):
-    if x is None or isinstance(x, torch.Tensor): return x
+    if x is None or (torch is not None and isinstance(x, torch.Tensor)): return x
     try:
         from torchax.interop import torch_view
         return torch_view(x)
@@ -146,10 +150,7 @@ def _lookup_conv_cache(self, state_len, T):
     if meta is not None:
         slot_src = getattr(meta, "state_indices_tensor", None)
         if slot_src is None: slot_src = getattr(meta, "mamba_state_indices", None)
-    if slot_src is not None:
-        slot = torch.clamp(_as_torch(slot_src).reshape(-1)[:1].to(dtype=torch.long, device=device), min=0)
-    else:
-        slot = torch.zeros(1, dtype=torch.long, device=device)
+    slot = torch.clamp(_as_torch(slot_src).reshape(-1)[:1].to(dtype=torch.long, device=device), min=0) if slot_src is not None else torch.zeros(1, dtype=torch.long, device=device)
     qsl = getattr(meta, "query_start_loc", None) if meta is not None else None
     if qsl is not None:
         qsl_t = _as_torch(qsl)
@@ -186,8 +187,7 @@ def _wrap_paddings(fn):
         p = fn(*a, **kw)
         if not (isinstance(p, list) and len(p) > 2): return p
         if os.environ.get("LFM_DIAG") == "1": return [16, 4096]
-        max_token_size = kw.get("max_token_size", a[1] if len(a) >= 2 else p[-1])
-        return sorted({16, 4096, int(max_token_size)})
+        return [16, 8192]
     _wrapped._is_pruned = True
     return _wrapped
 
@@ -226,12 +226,84 @@ def _patch_vllm_model_wrapper(mod):
     cls.modules = lambda self: self.model.modules() if getattr(self, "model", None) is not None else iter(())
     cls._modules_patched = True
 
+_MOE_BUFFERS, _CURRENT_EXPERT = {}, None
+
+def stack_expert_group(tensors, dim=0):
+    if not tensors: return None
+    if torch is not None and isinstance(tensors[0], torch.Tensor): return torch.stack(tensors, dim=dim)
+    try:
+        import jax.numpy as jnp
+        return jnp.stack(tensors, axis=dim)
+    except Exception:
+        import numpy as np
+        return np.stack(tensors, axis=dim)
+
 def _patch_loaded_module(name, mod):
     if not mod: return
     # 2026-11-01: per-phase timers (weight load / KV alloc / compile+warmup).
     if install_phase_hooks and name.endswith(("worker.tpu_worker", "runner.compilation_manager")):
         try: install_phase_hooks()
         except Exception: pass
+    if "weight_utils" in name:
+        cls = getattr(mod, "JaxAutoWeightsLoader", None)
+        if cls and not getattr(cls, "_moe_stack_patched", False):
+            orig_lm = getattr(cls, "_load_module", None)
+            if callable(orig_lm):
+                def _wrap_load_module(self, module_name, *a, **kw):
+                    global _CURRENT_EXPERT
+                    if "layers." in module_name:
+                        m = re.search(r"layers\.(\d+)", module_name)
+                        if m and getattr(self, "_last_phase_layer", None) != int(m.group(1)):
+                            self._last_phase_layer = int(m.group(1))
+                            print(f"[LFM25_PHASE] weight_load layer {self._last_phase_layer}/40", flush=True)
+                        m_exp = re.search(r"layers\.(\d+)\.feed_forward\.experts\.(\d+)\.(w[123])", module_name)
+                        _CURRENT_EXPERT = (int(m_exp.group(1)), m_exp.group(3), int(m_exp.group(2))) if m_exp else None
+                    res = orig_lm(self, module_name, *a, **kw)
+                    _CURRENT_EXPERT = None
+                    return res
+                cls._load_module = _wrap_load_module
+            cls._moe_stack_patched = True
+    if "wna16" in name:
+        cls = getattr(mod, "WNA16LinearMethod", None)
+        if cls and hasattr(cls, "process_weights_after_loading") and not getattr(cls, "_moe_stack_patched", False):
+            orig_pw = getattr(cls, "process_weights_after_loading")
+            def _wrap_pw(self, layer, *a, **kw):
+                global _CURRENT_EXPERT
+                m_exp = None; pref = getattr(layer, "prefix", None)
+                if pref: m_exp = re.search(r"layers\.(\d+).*?experts\.(\d+)\.(w[123])", pref)
+                if not m_exp and hasattr(layer, "named_modules"):
+                    for n, m in layer.named_modules():
+                        m_exp = re.search(r"layers\.(\d+).*?experts\.(\d+)\.(w[123])", getattr(m, "prefix", None) or n)
+                        if m_exp: break
+                old = _CURRENT_EXPERT
+                if m_exp: _CURRENT_EXPERT = (int(m_exp.group(1)), m_exp.group(3), int(m_exp.group(2)))
+                try: return orig_pw(self, layer, *a, **kw)
+                finally: _CURRENT_EXPERT = old
+            cls.process_weights_after_loading = _wrap_pw
+            cls._moe_stack_patched = True
+    if "utils" in name and hasattr(mod, "general_device_put"):
+        put_fn = getattr(mod, "general_device_put")
+        if callable(put_fn) and not getattr(put_fn, "_moe_stack_patched", False):
+            def _stacked_device_put(tensor, sharding=None, *a, **kw):
+                if _CURRENT_EXPERT is not None:
+                    l_idx, proj, e_idx = _CURRENT_EXPERT
+                    dev_key = ((l_idx, proj), "dev")
+                    cached = _MOE_BUFFERS.get(dev_key)
+                    if cached is not None: return cached[e_idx]
+                    buf = _MOE_BUFFERS.setdefault((l_idx, proj), {})
+                    buf[e_idx] = tensor
+                    if len(buf) == 64:
+                        stacked = stack_expert_group([buf[i] for i in sorted(buf.keys())], dim=0)
+                        try:
+                            import jax
+                            dev = jax.device_put(stacked, sharding)
+                        except Exception: dev = put_fn(stacked, sharding=sharding, *a, **kw)
+                        _MOE_BUFFERS[dev_key] = dev
+                        return dev[e_idx]
+                    return tensor
+                return put_fn(tensor, sharding=sharding, *a, **kw)
+            _stacked_device_put._moe_stack_patched = True
+            mod.general_device_put = _stacked_device_put
     if "short_conv" in name:
         cls = getattr(mod, "ShortConv", None)
         if cls and cls.forward is not _tpu_xla_short_conv_forward:
@@ -242,8 +314,7 @@ def _patch_loaded_module(name, mod):
         fn_s = getattr(mod, "supports_kv_cache_dtype", None)
         if callable(fn_s) and not getattr(fn_s, "_is_dtype_patched", False):
             wrapped = lambda dt, _fn=fn_s: True if dt in ("fp8", "int8", "k8v4") else _fn(dt)
-            wrapped._is_dtype_patched = True
-            mod.supports_kv_cache_dtype = wrapped
+            wrapped._is_dtype_patched = True; mod.supports_kv_cache_dtype = wrapped
     if "ragged_paged_attention.v3" in name:
         fn = getattr(mod, "static_validate_inputs", None)
         if callable(fn) and not getattr(fn, "_is_int8_patched", False):
@@ -252,25 +323,22 @@ def _patch_loaded_module(name, mod):
                 except ValueError as e:
                     if "dtype" in str(e).lower(): return None
                     raise
-            _wrap_val._is_int8_patched = True
-            mod.static_validate_inputs = _wrap_val
+            _wrap_val._is_int8_patched = True; mod.static_validate_inputs = _wrap_val
     if "tuned_block_sizes" in name:
         fn = getattr(mod, "get_tuned_block_sizes", None)
         if callable(fn) and not getattr(fn, "_is_tuned_patched", False):
-            def _wrap_tbs(dev, dtype, *a, _fn=fn, **kw):
-                if "int8" in str(dtype).lower() or "uint8" in str(dtype).lower():
-                    try: return _fn(dev, dtype, *a, **kw)
+            def _wrap_tbs(dev, dt, *a, _fn=fn, **kw):
+                if "int8" in str(dt).lower() or "uint8" in str(dt).lower():
+                    try: return _fn(dev, dt, *a, **kw)
                     except Exception:
                         import jax.numpy as jnp
                         return _fn(dev, jnp.bfloat16, *a, **kw)
-                return _fn(dev, dtype, *a, **kw)
-            _wrap_tbs._is_tuned_patched = True
-            mod.get_tuned_block_sizes = _wrap_tbs
+                return _fn(dev, dt, *a, **kw)
+            _wrap_tbs._is_tuned_patched = True; mod.get_tuned_block_sizes = _wrap_tbs
     if name.startswith("tpu_inference"):
         for c_name in ("TPUModelRunner", "CompilationManager"):
             cls = getattr(mod, c_name, None)
-            if cls and hasattr(cls, "_precompile_structured_decoding"):
-                setattr(cls, "_precompile_structured_decoding", lambda self, *a, **kw: None)
+            if cls and hasattr(cls, "_precompile_structured_decoding"): setattr(cls, "_precompile_structured_decoding", lambda self, *a, **kw: None)
 
 def patch_sys_modules():
     # from tpu_inference.runner import utils returns the parent; patch via sys.modules.

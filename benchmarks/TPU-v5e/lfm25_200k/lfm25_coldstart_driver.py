@@ -133,7 +133,7 @@ ver = read_vllm_version("/dev/shm/vllm_env")
 args_str = extract_cache_key_args(sub_src) or f"src:{hashlib.sha256(sub_src.encode()).hexdigest()[:12]}"
 patches_data = open("/content/tpu_v5e_patches.py", "rb").read() if os.path.exists("/content/tpu_v5e_patches.py") else b""
 max_len = 4096 if diag else 200000
-buckets_str = "16-4096" if diag else "16-4096-8192"
+buckets_str = "16-4096" if diag else "16-8192"
 cache_name = cache_filename(ver, args_str, patches_data, max_model_len=max_len, buckets=buckets_str)
 forced = os.environ.get("LFM_CACHE_FORCE_COLD") == "1"
 if diag or forced:

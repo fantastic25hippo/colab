@@ -26,7 +26,7 @@ def test_diag_padding_buckets():
         P.patch_sys_modules()
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("LFM_DIAG", None)
-            assert mods[0].get_token_paddings() == [16, 4096, 8192]
+            assert mods[0].get_token_paddings() == [16, 8192]
         with mock.patch.dict(os.environ, {"LFM_DIAG": "1"}, clear=False):
             for m in mods: assert m.get_token_paddings() == [16, 4096]
             assert mods[0].get_token_paddings(16, 8192, 0) == [16, 4096]
