@@ -15,7 +15,9 @@ except Exception: pass
 os.environ.update({
     "VLLM_ENABLE_V1_MULTIPROCESSING": "0", "VLLM_XLA_CACHE_PATH": "/dev/shm/tpu_compile_cache",
     "JAX_COMPILATION_CACHE_DIR": "/dev/shm/tpu_compile_cache",
-    "JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS": "0", "JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES": "0"
+    "JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS": "0",
+    "JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES": "-1",
+    "JAX_PERSISTENT_CACHE_ENABLE_XLA_CACHES": "all",
 })
 os.makedirs("/dev/shm/tpu_compile_cache", exist_ok=True)
 
@@ -47,9 +49,12 @@ def get_hbm():
 
 t_eng0 = time.time()
 model_path = "/dev/shm/lfm25_200k"
+# TODO(tpu-v5e): v5e has no native FP8. vLLM 0.32.0 CacheDType has no plain
+# "int8" (only "int8_per_token_head"). If LLM() rejects this string, extend
+# the allowed cache dtypes; do not silently fall back to fp8/float8_e4m3fn.
 llm = LLM(
     model=model_path, max_model_len=200000, max_num_seqs=1,
-    max_num_batched_tokens=8192, kv_cache_dtype="fp8",
+    max_num_batched_tokens=8192, kv_cache_dtype="int8",
     gpu_memory_utilization=0.92, enable_prefix_caching=False,
     trust_remote_code=True
 )

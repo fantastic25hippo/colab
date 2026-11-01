@@ -1,4 +1,15 @@
-import builtins, sys, torch, torch.nn.functional as F
+import builtins, logging, sys, torch, torch.nn.functional as F
+
+_PAD_MODULE_NAMES = (
+    "tpu_inference.runner.utils",
+    "tpu_inference.runner.tpu_runner",
+    "tpu_inference.runner.compilation_manager",
+)
+_DO_NOTHING_MSG = "Should not schedule a request that does nothing!"
+_TPU_RUNNER_LOGGERS = (
+    "tpu_inference.runner.tpu_runner",
+    "vllm.tpu_inference.runner.tpu_runner",
+)
 
 def reference_short_conv_forward(bcx, weight, conv_state, state_idx: int, activation: str = "silu"):
     B_gate, C_gate, x_in = bcx.chunk(3, dim=-1)
@@ -27,6 +38,27 @@ def sd_causal_conv(bx, weight, bias, state):
     if bias is not None: acc = acc + bias.reshape(1, -1)
     return acc, x_ext
 
+def _as_torch(x):
+    if x is None or isinstance(x, torch.Tensor): return x
+    try:
+        from torchax.interop import torch_view
+        return torch_view(x)
+    except Exception:
+        return x
+
+def _resolve_attn_metadata(self, wctx):
+    meta = None
+    try:
+        from vllm.forward_context import get_forward_context
+        meta = get_forward_context().attn_metadata
+    except Exception:
+        meta = None
+    if meta is None: meta = getattr(wctx, "attn_metadata", None)
+    if isinstance(meta, dict):
+        pref = getattr(self, "prefix", None)
+        meta = meta.get(pref) if pref is not None else None
+    return meta
+
 def _tpu_xla_short_conv_forward(self, hidden_states: torch.Tensor, output: torch.Tensor):
     # Traced by torchax from capture_model/model_fn. Token count stays a device scalar.
     bcx, _ = self.in_proj(hidden_states)
@@ -41,7 +73,7 @@ def _tpu_xla_short_conv_forward(self, hidden_states: torch.Tensor, output: torch
     output[:out_t.shape[0]] = out_t
     if bound is None: return
     wctx, idx, raw, _, conv_t, slot, n = bound
-    new_state = x_ext.index_select(0, (n + torch.arange(state_len, device=n.device)).reshape(-1))
+    new_state = x_ext.index_select(0, (n + torch.arange(state_len, device=conv_t.device)).reshape(-1))
     if int(conv_t.shape[-1]) != D: new_state = new_state.transpose(0, 1)
     updated = conv_t.index_copy(0, slot.reshape(-1), new_state.unsqueeze(0))
     from torchax.interop import jax_view
@@ -56,18 +88,45 @@ def _lookup_conv_cache(self, state_len, T):
         return None
     mapping = getattr(wctx, "layer_name_to_kvcache_index", None) or {}
     if getattr(self, "prefix", None) not in mapping: return None
-    from torchax.interop import torch_view
     idx, raw = mapping[self.prefix], wctx.kv_caches[mapping[self.prefix]]
     arr = raw[0] if isinstance(raw, (tuple, list)) else raw
-    conv_t, shared = torch_view(arr), getattr(wctx, "shared_attn_metadata", None)
-    if shared is not None and getattr(shared, "mamba_state_indices", None) is not None:
-        slot = torch.clamp(torch_view(shared.mamba_state_indices).reshape(-1)[:1].to(torch.long), min=0)
-        n = torch.clamp((torch_view(shared.query_start_loc)[1] - torch_view(shared.query_start_loc)[0]).to(torch.long), 0, T)
+    conv_t = _as_torch(arr)
+    device = conv_t.device
+    meta = _resolve_attn_metadata(self, wctx)
+    slot_src = None
+    if meta is not None:
+        slot_src = getattr(meta, "state_indices_tensor", None)
+        if slot_src is None: slot_src = getattr(meta, "mamba_state_indices", None)
+    if slot_src is not None:
+        slot = torch.clamp(_as_torch(slot_src).reshape(-1)[:1].to(dtype=torch.long, device=device), min=0)
     else:
-        slot = torch.zeros(1, dtype=torch.long, device=conv_t.device)
-        n = torch.full((), T, dtype=torch.long, device=conv_t.device)
+        slot = torch.zeros(1, dtype=torch.long, device=device)
+    qsl = getattr(meta, "query_start_loc", None) if meta is not None else None
+    if qsl is not None:
+        qsl_t = _as_torch(qsl)
+        n = torch.clamp((qsl_t[1] - qsl_t[0]).to(torch.long), min=0, max=T).to(device=device)
+    else:
+        n = torch.full((), T, dtype=torch.long, device=device)
     prev = conv_t.index_select(0, slot.reshape(-1)).squeeze(0)
     if int(prev.shape[0]) != state_len: prev = prev.transpose(0, 1)
+    zeros = torch.zeros(prev.shape, dtype=prev.dtype, device=device)
+    keep = None
+    has_init = None
+    if meta is not None:
+        for attr in ("has_initial_states", "has_initial_states_p", "has_initial_states_d"):
+            has_init = getattr(meta, attr, None)
+            if has_init is not None: break
+    if has_init is not None:
+        hi = has_init if isinstance(has_init, torch.Tensor) else _as_torch(has_init)
+        if not isinstance(hi, torch.Tensor): hi = torch.tensor(hi, device=device)
+        keep = hi.reshape(-1)[:1].to(dtype=torch.bool, device=device).reshape(())
+    seq_t = getattr(meta, "seq_lens", None) if meta is not None else None
+    if seq_t is not None:
+        ctx_len = _as_torch(seq_t).reshape(-1)[0].to(dtype=torch.long, device=device)
+        not_chunk0 = ctx_len > n
+        keep = not_chunk0 if keep is None else (keep & not_chunk0)
+    if keep is not None:
+        prev = torch.where(keep, prev, zeros)
     return wctx, idx, raw, prev, conv_t, slot, n
 
 _orig_import = builtins.__import__
@@ -75,9 +134,46 @@ _orig_import = builtins.__import__
 def _wrap_paddings(fn):
     def _wrapped(*a, **kw):
         p = fn(*a, **kw)
-        return sorted(set((p[0], p[-1]))) if isinstance(p, list) and len(p) > 2 else p
+        if not (isinstance(p, list) and len(p) > 2): return p
+        max_token_size = kw.get("max_token_size", a[1] if len(a) >= 2 else p[-1])
+        return sorted({16, 4096, int(max_token_size)})
     _wrapped._is_pruned = True
     return _wrapped
+
+def _patch_padding_modules():
+    wrapped = None
+    for m_name in _PAD_MODULE_NAMES:
+        m = sys.modules.get(m_name)
+        if not m: continue
+        fn = getattr(m, "get_token_paddings", None)
+        if callable(fn) and not getattr(fn, "_is_pruned", False):
+            wrapped = _wrap_paddings(fn)
+            setattr(m, "get_token_paddings", wrapped)
+        elif getattr(fn, "_is_pruned", False):
+            wrapped = fn
+    if wrapped is None: return
+    for m_name in _PAD_MODULE_NAMES:
+        m = sys.modules.get(m_name)
+        if m is not None: setattr(m, "get_token_paddings", wrapped)
+
+class _DropEmptyScheduleFilter(logging.Filter):
+    def filter(self, record):
+        try: msg = record.getMessage()
+        except Exception: msg = str(getattr(record, "msg", ""))
+        return _DO_NOTHING_MSG not in msg
+
+def _install_tpu_runner_warning_filter():
+    filt = _DropEmptyScheduleFilter()
+    for name in _TPU_RUNNER_LOGGERS:
+        lg = logging.getLogger(name)
+        if not any(isinstance(f, _DropEmptyScheduleFilter) for f in lg.filters):
+            lg.addFilter(filt)
+
+def _patch_vllm_model_wrapper(mod):
+    cls = getattr(mod, "VllmModelWrapper", None)
+    if cls is None or getattr(cls, "_modules_patched", False): return
+    cls.modules = lambda self: self.model.modules() if getattr(self, "model", None) is not None else iter(())
+    cls._modules_patched = True
 
 def _patch_loaded_module(name, mod):
     if not mod: return
@@ -85,6 +181,8 @@ def _patch_loaded_module(name, mod):
         cls = getattr(mod, "ShortConv", None)
         if cls and cls.forward is not _tpu_xla_short_conv_forward:
             cls.forward = _tpu_xla_short_conv_forward
+    if name.endswith("vllm_model_wrapper") and "context" not in name:
+        _patch_vllm_model_wrapper(mod)
     if "tpu_platform" in name:
         fn_s = getattr(mod, "supports_kv_cache_dtype", None)
         if callable(fn_s) and not getattr(fn_s, "_is_dtype_patched", False):
@@ -114,9 +212,6 @@ def _patch_loaded_module(name, mod):
             _wrap_tbs._is_tuned_patched = True
             mod.get_tuned_block_sizes = _wrap_tbs
     if name.startswith("tpu_inference"):
-        fn_pad = getattr(mod, "get_token_paddings", None)
-        if callable(fn_pad) and not getattr(fn_pad, "_is_pruned", False):
-            setattr(mod, "get_token_paddings", _wrap_paddings(fn_pad))
         for c_name in ("TPUModelRunner", "CompilationManager"):
             cls = getattr(mod, c_name, None)
             if cls and hasattr(cls, "_precompile_structured_decoding"):
@@ -126,8 +221,9 @@ def patch_sys_modules():
     # from tpu_inference.runner import utils returns the parent; patch via sys.modules.
     # Leave jax.clear_caches live so weight-load JIT is freed before the KV alloc.
     for m_name, m in list(sys.modules.items()):
-        if m and isinstance(m_name, str) and (m_name.startswith("tpu_inference") or "short_conv" in m_name):
+        if m and isinstance(m_name, str) and (m_name.startswith("tpu_inference") or "short_conv" in m_name or m_name.endswith("vllm_model_wrapper")):
             _patch_loaded_module(m_name, m)
+    _patch_padding_modules()
 
 def custom_import(name, *args, **kwargs):
     mod = _orig_import(name, *args, **kwargs)
@@ -137,4 +233,5 @@ def custom_import(name, *args, **kwargs):
 
 def install_all_patches():
     builtins.__import__ = custom_import
+    _install_tpu_runner_warning_filter()
     patch_sys_modules()

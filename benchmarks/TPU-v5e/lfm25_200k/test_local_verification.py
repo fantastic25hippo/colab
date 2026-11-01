@@ -1,4 +1,5 @@
 import os, sys, time, numpy as np, torch
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config_builder import build_lfm2_config, match_layer_to_quant_group
 from repack_q4_utils import unpack_gguf_q4_0_to_ct_int32, dequantize_q4_0_to_float
 from tpu_v5e_patches import reference_short_conv_forward, install_all_patches
@@ -86,14 +87,32 @@ def test_budget_and_k8v4_kernel():
     assert out.shape == (1, 32, 64), f"Bad K8V4 out shape: {out.shape}"
     print(f"PASS (Total HBM at 200K = {total_gib:.2f} GiB < 14.49 GiB ceiling)")
 
+def _put_mod(name, **attrs):
+    import types
+    parts = name.split(".")
+    for i in range(1, len(parts) + 1):
+        n = ".".join(parts[:i])
+        if n not in sys.modules:
+            m = types.ModuleType(n)
+            m.__path__ = []
+            sys.modules[n] = m
+            if i > 1:
+                setattr(sys.modules[".".join(parts[:i - 1])], parts[i - 1], m)
+    m = sys.modules[name]
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    return m
+
 def test_sys_modules_hook_and_sd_layout():
     print("[TEST 5] Verifying sys.modules padding hook and SD conv state...", end=" ")
     import types
     from tpu_v5e_patches import patch_sys_modules, sd_causal_conv
     def ladder(*a, **k):
         return [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
-    utils, comp = types.ModuleType("tpu_inference.runner.utils"), types.ModuleType("tpu_inference.runner.compilation_manager")
-    utils.get_token_paddings = comp.get_token_paddings = ladder
+    utils = types.ModuleType("tpu_inference.runner.utils")
+    runner = types.ModuleType("tpu_inference.runner.tpu_runner")
+    comp = types.ModuleType("tpu_inference.runner.compilation_manager")
+    utils.get_token_paddings = runner.get_token_paddings = comp.get_token_paddings = ladder
     wu = types.ModuleType("tpu_inference.models.jax.utils.weight_utils")
     class Jax:
         def clear_caches(self): raise RuntimeError("cleared")
@@ -102,12 +121,15 @@ def test_sys_modules_hook_and_sd_layout():
         def get_kv_cache_spec(self): return {"attn": 1}
     km = types.ModuleType("tpu_inference.runner.kv_cache_manager")
     km.KVCacheManager = KVCacheManager
-    names = (utils.__name__, comp.__name__, wu.__name__, km.__name__)
-    for mod in (utils, comp, wu, km): sys.modules[mod.__name__] = mod
+    names = (utils.__name__, runner.__name__, comp.__name__, wu.__name__, km.__name__)
+    for mod in (utils, runner, comp, wu, km): sys.modules[mod.__name__] = mod
     try:
         patch_sys_modules()
-        assert utils.get_token_paddings() == [16, 8192]
-        assert comp.get_token_paddings() == [16, 8192]
+        want = [16, 4096, 8192]
+        assert utils.get_token_paddings() == want
+        assert runner.get_token_paddings() == want
+        assert comp.get_token_paddings() == want
+        assert utils.get_token_paddings(16, 8192, 0) == want
         try:
             wu.jax.clear_caches(); raise AssertionError("clear_caches was no-op'd")
         except RuntimeError: pass
@@ -126,6 +148,106 @@ def test_sys_modules_hook_and_sd_layout():
     assert torch.equal(x_ext.index_select(0, torch.tensor(1) + torch.arange(2)), torch.stack([state[1], bx[0]]))
     print("PASS")
 
+class _NS:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+def test_lookup_conv_cache_metadata_slot_n_and_mask():
+    print("[TEST 6] Verifying _lookup_conv_cache metadata, slot, n, mask...", end=" ")
+    from tpu_v5e_patches import _lookup_conv_cache
+    prefix = "model.layers.2.conv"
+    conv_t = torch.arange(9 * 2 * 4, dtype=torch.float32).reshape(9, 2, 4)
+    layer = _NS(prefix=prefix)
+    wctx = _NS(layer_name_to_kvcache_index={prefix: 0}, kv_caches=[conv_t],
+               attn_metadata=None, shared_attn_metadata=None)
+    _put_mod("tpu_inference.models.vllm.vllm_model_wrapper_context",
+             get_vllm_model_wrapper_context=lambda: wctx)
+    # 1) get_forward_context: unpadded n, slot from state_indices_tensor, keep prev
+    meta = _NS(
+        state_indices_tensor=torch.tensor([3], dtype=torch.long),
+        query_start_loc=torch.tensor([0, 5], dtype=torch.long),
+        has_initial_states=torch.tensor([True]),
+        seq_lens=torch.tensor([12], dtype=torch.long),
+    )
+    _put_mod("vllm.forward_context", get_forward_context=lambda: _NS(attn_metadata=meta))
+    bound = _lookup_conv_cache(layer, 2, 16)
+    assert bound is not None
+    _, idx, raw, prev, got_conv, slot, n = bound
+    assert idx == 0 and raw is conv_t and got_conv is conv_t
+    assert int(slot.reshape(-1)[0]) == 3
+    assert int(n.reshape(())) == 5
+    assert torch.equal(prev, conv_t[3])
+    assert slot.device == conv_t.device and n.device == conv_t.device and prev.device == conv_t.device
+    # 2) has_initial_states false zeros prev (do not use padded n=T)
+    meta.has_initial_states = torch.tensor([False])
+    _, _, _, prev0, _, _, n0 = _lookup_conv_cache(layer, 2, 16)
+    assert int(n0.reshape(())) == 5
+    assert torch.equal(prev0, torch.zeros_like(conv_t[3]))
+    # 3) unwrap per-layer dict via self.prefix
+    meta.has_initial_states = torch.tensor([True])
+    _put_mod("vllm.forward_context",
+             get_forward_context=lambda: _NS(attn_metadata={prefix: meta, "other": _NS()}))
+    _, _, _, prev_d, _, slot_d, n_d = _lookup_conv_cache(layer, 2, 16)
+    assert int(slot_d.reshape(-1)[0]) == 3 and int(n_d.reshape(())) == 5
+    assert torch.equal(prev_d, conv_t[3])
+    # 4) fallback wctx.attn_metadata + mamba_state_indices; ctx_len <= n zeros prev
+    def _boom():
+        raise RuntimeError("no forward context")
+    _put_mod("vllm.forward_context", get_forward_context=_boom)
+    wctx.attn_metadata = _NS(
+        mamba_state_indices=torch.tensor([7], dtype=torch.long),
+        query_start_loc=torch.tensor([0, 8], dtype=torch.long),
+        seq_lens=torch.tensor([8], dtype=torch.long),
+    )
+    _, _, _, prev_fb, _, slot_fb, n_fb = _lookup_conv_cache(layer, 2, 16)
+    assert int(slot_fb.reshape(-1)[0]) == 7 and int(n_fb.reshape(())) == 8
+    assert torch.equal(prev_fb, torch.zeros_like(conv_t[7]))
+    print("PASS")
+
+def test_tpu_runner_warning_filter_and_wrapper_modules():
+    print("[TEST 7] Verifying tpu_runner warning filter and VllmModelWrapper.modules...", end=" ")
+    import logging, types
+    from tpu_v5e_patches import install_all_patches, patch_sys_modules
+    install_all_patches()
+    rec = []
+    class H(logging.Handler):
+        def emit(self, record): rec.append(record.getMessage())
+    lg = logging.getLogger("tpu_inference.runner.tpu_runner")
+    lg.setLevel(logging.WARNING)
+    h = H(); lg.addHandler(h)
+    try:
+        lg.warning("Should not schedule a request that does nothing!")
+        lg.warning("other runner message")
+        assert rec == ["other runner message"]
+    finally:
+        lg.removeHandler(h)
+    wrap = types.ModuleType("tpu_inference.models.vllm.vllm_model_wrapper")
+    class VllmModelWrapper: pass
+    wrap.VllmModelWrapper = VllmModelWrapper
+    sys.modules[wrap.__name__] = wrap
+    try:
+        patch_sys_modules()
+        inst = VllmModelWrapper()
+        assert list(inst.modules()) == []
+        class Inner:
+            def modules(self):
+                yield "layer0"
+        inst.model = Inner()
+        assert list(inst.modules()) == ["layer0"]
+    finally:
+        sys.modules.pop(wrap.__name__, None)
+    print("PASS")
+
+def test_subrunner_int8_kv_and_jax_cache_env():
+    print("[TEST 8] Verifying int8 KV flag and JAX persistent cache env...", end=" ")
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = open(os.path.join(here, "lfm25_engine_subrunner.py")).read()
+    assert 'kv_cache_dtype="int8"' in src
+    assert 'kv_cache_dtype="fp8"' not in src
+    assert 'JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES": "-1"' in src
+    assert 'JAX_PERSISTENT_CACHE_ENABLE_XLA_CACHES": "all"' in src
+    print("PASS")
+
 if __name__ == "__main__":
     t0 = time.time()
     test_trap2_split_plane_q4_0()
@@ -133,4 +255,8 @@ if __name__ == "__main__":
     test_trap3_short_conv_and_patches()
     test_budget_and_k8v4_kernel()
     test_sys_modules_hook_and_sd_layout()
-    print(f"All 5 verification test suites passed in {time.time() - t0:.2f}s!")
+    test_lookup_conv_cache_metadata_slot_n_and_mask()
+    test_tpu_runner_warning_filter_and_wrapper_modules()
+    test_subrunner_int8_kv_and_jax_cache_env()
+    print(f"All 8 verification test suites passed in {time.time() - t0:.2f}s!")
+
