@@ -54,6 +54,26 @@ def write_results(res):
     with open("/content/engine_results.json", "w") as f: json.dump(res, f, indent=2)
     log_sub("Wrote /content/engine_results.json")
 
+_diag_on = os.environ.get("LFM_DIAG") == "1" or os.environ.get("LFM_JOB9_DIAG") == "1"
+_diag_stop, _diag_meta = None, None
+if _diag_on:
+    import faulthandler, shutil, subprocess, threading
+    _t_g0, _sdir = float(os.environ.get("T0_GLOBAL") or time.time()), "/content/job9_stacks"; os.makedirs(_sdir, exist_ok=True)
+    _ps = shutil.which("py-spy") or ("/dev/shm/vllm_env/bin/py-spy" if os.path.exists("/dev/shm/vllm_env/bin/py-spy") else None)
+    _d_meth = f"py-spy ({subprocess.run([_ps, '--version'], capture_output=True, text=True).stdout.strip()})" if _ps else "faulthandler.dump_traceback"
+    _diag_stop, _diag_meta = threading.Event(), {"method": _d_meth, "t_global0": _t_g0, "samples": 0}; log_sub(f"[LFM_DIAG] sampler={_d_meth} t_global0={_t_g0:.2f}")
+    def _sampler():
+        while not _diag_stop.is_set():
+            rel = time.time() - _t_g0
+            try:
+                with open(f"{_sdir}/{rel:07.2f}.txt", "w") as f:
+                    f.write(f"# rel_s={rel:.3f} ts={time.time():.3f} pid={os.getpid()} method={_d_meth}\n"); f.flush()
+                    subprocess.run([_ps, "dump", "--pid", str(os.getpid())], stdout=f, stderr=subprocess.STDOUT, timeout=0.9) if _ps else faulthandler.dump_traceback(file=f, all_threads=True)
+                _diag_meta["samples"] += 1
+            except Exception: pass
+            _diag_stop.wait(1.0)
+    threading.Thread(target=_sampler, daemon=True).start()
+
 t_imp0 = time.time()
 log_sub(f"Importing jax and vllm for LFM2.5-24B-A2B ({ctx_k} context)...")
 t0 = time.time(); import jax; log_sub(f"import jax: {time.time() - t0:.2f}s")
@@ -92,6 +112,18 @@ class _CfgHandler(logging.Handler):
 _cfgh = _CfgHandler(level=logging.INFO)
 _loggers = [logging.getLogger(), logging.getLogger("vllm"), logging.getLogger("vllm.v1.engine.core")]
 for _lg in _loggers: _lg.addHandler(_cfgh)
+if _diag_on:
+    import vllm.engine.arg_utils as _au, vllm.v1.engine.core as _ec
+    _orig_cec, _orig_eci = _au.EngineArgs.create_engine_config, _ec.EngineCore.__init__
+    def _d_cec(self, *a, **kw):
+        t0 = time.perf_counter()
+        try: return _orig_cec(self, *a, **kw)
+        finally: _diag_meta["create_engine_config_s"] = round(time.perf_counter() - t0, 4)
+    def _d_eci(self, *a, **kw):
+        global config_setup_s
+        if config_setup_s is None: config_setup_s = round(time.perf_counter() - t_eng0, 2); log_sub(f"[LFM_DIAG] EngineCore.__init__ reached: config_setup_s={config_setup_s:.2f}s (t_rel={time.time()-_t_g0:.2f}s)")
+        return _orig_eci(self, *a, **kw)
+    _au.EngineArgs.create_engine_config, _ec.EngineCore.__init__ = _d_cec, _d_eci
 try:
     # 2026-11-01: kv_cache_dtype left at the default ("auto" -> bf16). fp8 is NOT re-enabled.
     if os.environ.get("LFM_PROFILE_LOAD") == "1":
@@ -108,6 +140,7 @@ except Exception as e:
     err = f"{type(e).__name__}: {e}"
 finally:
     for _lg in _loggers: _lg.removeHandler(_cfgh)
+    if _diag_on: _au.EngineArgs.create_engine_config, _ec.EngineCore.__init__ = _orig_cec, _orig_eci
 init_dur = time.perf_counter() - t_eng0
 cache_after = dir_stats(cache_dir)
 
@@ -189,10 +222,11 @@ if os.environ.get("LFM_SHORT_REQUEST") == "1":
     if ttft_s is None: ttft_s = lat_s
     txt = out16[0].outputs[0].text if out16 and out16[0].outputs else ""
     tok_ids = getattr(out16[0].outputs[0], "token_ids", [])
+    if _diag_stop is not None: _diag_stop.set()
     log_sub(f"[LFM_SHORT_REQUEST] TTFT: {ttft_s:.4f}s, total latency: {lat_s:.4f}s, tokens={len(tok_ids)}, text={txt!r}")
     results = dict(base, first_token_ts=first_tok_ts,
                    short_request={"ttft_s": round(ttft_s, 4), "latency_s": round(lat_s, 4), "n_tokens": len(tok_ids), "text": txt},
-                   hbm_stats=get_hbm(), log_timeline=timeline.rows)
+                   hbm_stats=get_hbm(), log_timeline=timeline.rows, **({"diag_meta": _diag_meta} if _diag_meta else {}))
     write_results(results)
     log_sub("Engine short request complete")
     sys.exit(0)

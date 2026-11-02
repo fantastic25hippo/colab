@@ -288,6 +288,30 @@ Environment: TPU v5e-1, max_model_len=100000, SKIP_JAX_PRECOMPILE=0, LFM_SHORT_R
 - Subrunner spawned at rel 16.65s; weights barrier cleared after 0.00s wait.
 - `llm_init_unaccounted_s`: 21.94s (mostly the inferred config_setup + precompile gap).
 
+## Part 8: Job 9 Diagnostic Report — `config_setup` (W1) and Pre-Warmup Gap (W2)
+Environment: TPU v5e-1 (`tpu-lfm25`), `max_model_len=100000`, `SKIP_JAX_PRECOMPILE=0`, `LFM_SHORT_REQUEST=1`, `LFM_BEARINGS=1`, `LFM_DIAG=1` hooks enabled in subrunner, warm restore (`tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__5a0d66f4.tar`, `hit=true`, 92 entries / 196.0 MB). Sampler: `py-spy dump --pid` (`py-spy 0.4.2`, 1.0 s interval, 77 samples in `job9_stacks/`).
+- **`config_setup_s` (W1)**: **`19.15 s`** (`MEASURED`, direct `time.perf_counter()` around `EngineCore.__init__`; `EngineArgs.create_engine_config` = **`11.5473 s`** `MEASURED`; `llm_init_unaccounted_s` = **`3.10 s`** `MEASURED`). Job 8 bounds: `job8_warm.log:33` (`09:44:30`) to `job8_warm.log:47` (`09:44:49`), ~19.0 s (`INFERRED`). Job 9 bounds: `job9_warm.log:35` (`10:28:31`, `rel_s=49.86s`) to `job9_warm.log:49-50` (`10:28:50`, `rel_s=69.01s`), **18 samples** (`0049.94.txt`..`0068.94.txt`).
+- **Pre-Warmup Gap (W2)**: **`21.89 s`** (`MEASURED` from `start_rel`: `76.69 - 54.80` in `job9_warm.log:185,199`; **`21.20 s`** `MEASURED` in `job8_warm.log:181,196` from `74.75 - 53.55`). Job 8 bounds: `job8_warm.log:180-182` (`09:45:06`, `start_rel=53.55`) to `job8_warm.log:195-196` (`09:45:27`, `start_rel=74.75`). Job 9 bounds: `job9_warm.log:184-186` (`10:29:08`, `start_rel=54.80`, `rel_s=86.57s`) to `job9_warm.log:198-199` (`10:29:30`, `start_rel=76.69`, `rel_s=108.22s`), **20 samples** (`0086.57.txt`..`0108.22.txt`).
+
+| Window | Rank | Top 3 Frames (`file:function`) | Top App Frame (`path:line`) | Samples (MEASURED) | Approx. s (INFERRED) |
+|---|---|---|---|---|---|
+| W1 | 1 | `selectors.py:select -> subprocess.py:_communicate -> subprocess.py:communicate` | `vllm/model_executor/models/registry.py:1563(_run_in_subprocess)` | 11 / 18 | ~11.7 s |
+| W1 | 2 | `tpu_v5e_patches.py:patch_sys_modules -> tpu_v5e_patches.py:custom_import -> <mod>:<module>` | `tpu_v5e_patches.py:577-578(patch_sys_modules)` | 4 / 18 | ~4.2 s |
+| W1 | 3 | `<frozen importlib._bootstrap_external>:get_data -> get_code -> exec_module` | `tpu_v5e_patches.py:592(custom_import)` | 1 / 18 | ~1.1 s |
+| W1 | 4 | `<frozen importlib._bootstrap>:release -> __exit__ -> _find_and_load` | `tpu_v5e_patches.py:592(custom_import)` | 1 / 18 | ~1.1 s |
+| W1 | 5 | `tokenization_utils_base.py:from_pretrained -> tokenization_auto.py:from_pretrained -> hf.py:from_pretrained` | `vllm/v1/engine/input_processor.py:94(__init__)` | 1 / 18 | ~1.1 s |
+| W2 | 1 | `pjit.py:_infer_params -> pjit.py:cache_miss -> traceback_util.py:reraise_with_filtered_traceback` | JAX `pjit` tracing (`jax/_src/pjit.py:644`, `kernel_hd64.py:522`) | 2 / 20 | ~2.2 s |
+| W2 | 2 | `lowering.py:jaxpr_subcomp -> lowering.py:_cond_lowering_rule -> lowering.py:jaxpr_subcomp` | Pallas Mosaic lowering (`jax/_src/pallas/mosaic/lowering.py:1784,1818`) | 2 / 20 | ~2.2 s |
+| W2 | 3 | `<string>:__init__ -> source_info_util.py:__add__ -> lowering.py:jaxpr_subcomp` / `mlir.py:jaxpr_subcomp` | JAX/MLIR & Mosaic lowering (`jax/_src/interpreters/mlir.py:2461`) | 2 / 20 | ~2.2 s |
+| W2 | 4 | `compilation_cache.py:decompress_executable -> compilation_cache.py:get_executable_and_time -> compiler.py:_cache_read` | Persistent cache zstd decompress (`jax/_src/compilation_cache.py:312`) | 1 / 20 | ~1.1 s |
+| W2 | 5 | `core.py:<lambda> -> gmm_v2.py:validate_inputs -> gmm_v2.py:make_gmm_configs` | MoE GMM v2 tracing (`tpu_inference/layers/vllm/gmm_v2/gmm_v2.py:1284`) | 1 / 20 | ~1.1 s |
+
+*(Remaining 12 W2 samples: 1 sample / ~1.1 s each across `mosaic/primitives.py:263`, `partial_eval.py:2250`, `pjit.py:658`, `jax/_src/core.py:320`, `mlir.py:1303`, `torchax/tensor.py:724`, `ufunc_api.py:176`, `dtypes.py`, `indexing.py`, `effects.py`, `api_util.py`).*
+- **W1 Diagnosis (`INFERRED` from `MEASURED` stacks)**: ~11.5 s (61%) is spent blocked in `selectors.select()` while `ModelConfig.__post_init__` (`vllm/config/model.py:694,730`) spawns a fresh `python3 -m vllm.model_executor.models.registry` child process via `_LoadedModel.inspect_model_cls` (`vllm/model_executor/models/registry.py:1079`) -> `_run_in_subprocess` (`vllm/model_executor/models/registry.py:1563`) to inspect `Lfm2MoeForCausalLM`. ~5.0 s is lazy module/plugin imports in `LLM.__init__` (`vllm/entrypoints/llm.py:339` also resets loggers via `configure_logging_if_needed`, detaching Job 8's `_CfgHandler`), and ~2.6 s is tokenizer load (`vllm/v1/engine/input_processor.py:94`).
+- **W2 Diagnosis (`INFERRED` from `MEASURED` stacks)**: Host CPU symbolic tracing (`torch.compile` + `torchax` + JAX `pjit`) and MLIR/Mosaic lowering (`lowered = fn.lower(*args, **call_kwargs)`) inside `CompilationManager._run_compilation` (`tpu-inference/tpu_inference/runner/compilation_manager.py:190`), plus cache lookup (`lowered.compile()` at `:209`, 0.34 s for bucket 16 and 1.56 s for bucket 8192), invoked from `capture_model` (`:272-273`). Bucket 16 takes ~8.0 s (`4.96 s` in `torch.compile` at `monitor.py:62` + `2.7 s` JAX lowering + `0.34 s` cache read); bucket 8192 takes ~13.9 s (`~12.3 s` JAX/Pallas/GMM v2 lowering + `1.56 s` cache decompress). Warmup tasks only run after both buckets finish lowering, inside `_flush_compilations()` (`:248-255`).
+- **Overhead Check (`MEASURED`)**: `llm_init_s` `71.80 s` (vs `69.42 s` Job 8; `+2.38 s` from 1 Hz `py-spy` ptrace attach; `compile_warmup_s` `32.81 s` vs `31.61 s`, `+1.19 s`); in-VM total `113.11 s` (vs `107.86 s` Job 8, including `+2.73 s` pre-subrunner HF `venv_dl_s` variance `11.54 s` vs `8.81 s`; in-subrunner delta `+2.52 s`); host total `122.15 s` (vs `118.35 s`); host EXEC wall `136.1 s` (vs `122.6 s`, includes post-run stdout tar transfer of 77 stack files).
+
+
 
 
 
