@@ -72,9 +72,20 @@ t_eng0 = time.perf_counter()
 err = None
 try:
     # 2026-11-01: kv_cache_dtype left at the default ("auto" -> bf16). fp8 is NOT re-enabled.
-    llm = LLM(model="/dev/shm/lfm25_200k", max_model_len=200000, max_num_seqs=1,
-              max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
-              enable_prefix_caching=False, trust_remote_code=True)
+    if os.environ.get("LFM_PROFILE_LOAD") == "1":
+        import cProfile, pstats
+        pr = cProfile.Profile(); pr.enable()
+        try:
+            llm = LLM(model="/dev/shm/lfm25_200k", max_model_len=200000, max_num_seqs=1,
+                      max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
+                      enable_prefix_caching=False, trust_remote_code=True)
+        finally:
+            pr.disable(); pr.dump_stats("/content/lfm_load.prof")
+            s = pstats.Stats(pr); s.sort_stats("cumulative").print_stats(40); s.sort_stats("tottime").print_stats(40)
+    else:
+        llm = LLM(model="/dev/shm/lfm25_200k", max_model_len=200000, max_num_seqs=1,
+                  max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
+                  enable_prefix_caching=False, trust_remote_code=True)
 except Exception as e:
     err = f"{type(e).__name__}: {e}"
 init_dur = time.perf_counter() - t_eng0

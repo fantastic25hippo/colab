@@ -111,4 +111,44 @@ Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192
 - `[LFM_BEARINGS] KV total_gib=2.0409 (2191441920 bytes)`
 - `[LFM_BEARINGS] HBM after KV allocation: used=14.488 GiB (15556598272 B), free=1.260 GiB (1352737792 B)`
 
+## Part 3: CPU Model Loading Profile Breakdown (Job 4)
+
+Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192]`, `LFM_PROFILE_LOAD=1`, `LFM_BEARINGS=1`, `LFM_BEARINGS_STOP=1`, `SKIP_JAX_PRECOMPILE=1`, `FORCE_COLD`, `NO_UPLOAD`.
+Profile artifact: `benchmarks/TPU-v5e/lfm25_200k/lfm_load.prof` (size: 2,491,403 bytes, 774,797,677 total function calls).
+Raw profiled `vllm_get_model`: 262.0197s (MEASURED in `job4_profile.log`). Unprofiled baseline: 133.9978s (MEASURED in Job 3).
+
+### Time Breakdown (~134 s Baseline)
+
+| Component | Profile Time (MEASURED) | Baseline Time (~134 s) | Status | Profiler Source & Evidence |
+|---|---|---|---|---|
+| safetensors read | 1.153s | 1.15s | INFERRED | `weight_utils.py:1083(safetensors_weights_iterator)` cumtime 1.153s; `safe_open.get_tensor` cumtime 1.063s (tottime 0.624s across 22,308 calls); `from_file` tottime 0.394s. Shards are cached in `/dev/shm` (TMPFS RAM, ~11.4 GB/s read). |
+| compressed-tensors/dequant | 212.708s (cumtime in `load_weights` excl. process_weights) | 103.18s | INFERRED | `default_loader.py:501(load_weights)` took 110.71s in unprofiled Job 3 log. Subtracting safetensors read (1.15s) and `process_weights_after_loading` (6.38s baseline) leaves 103.18s spent in 21,888 expert weight slicing, unbinding, narrow, packing/unpacking, parameter assignment across MoE layers (`routed_experts.py:682(weight_loader)` cumtime 221.381s in profile). |
+| process_weights_after_loading | 12.475s | 6.38s | INFERRED | `model_loader/utils.py:139(process_weights_after_loading)` cumtime 12.475s (MEASURED in profile). Broken down into: `compressed_tensors_moe_w4a8.py:189` (8.940s, MoE int4 re-quantization & padding), `compressed_tensors.py:1048` (1.745s), `compressed_tensors_w8a8_int8.py:114` (1.717s), and unquantized (1.284s). Scaled to unprofiled baseline (12.475s * 133.9978 / 262.0197 = 6.38s). |
+| torch-to-jax conversion | 0.406s (shard) / 1.304s (t2j) | 0.35s | MEASURED | `[LFM_BEARINGS] load TPU shard_model_to_tpu: dur_s=0.3473s` (MEASURED in Job 3 log; 0.4060s in Job 4 profile log; `cleanup_sharding.py:42(shard_model_to_tpu)` cumtime 0.406s). `t2j` conversion cumtime 1.304s (`tpu_inference/utils.py:143`). |
+| other | 35.278s | 22.94s | INFERRED | Model architecture instantiation (`base_loader.py:82`: `Initializing model took 11.210083 seconds` MEASURED in Job 3 log; 23.558s in profile log), OpenTelemetry wrapper, custom ops registration, torch library bindings, and wrapper overhead (133.9978s - 1.15s - 103.18s - 6.38s - 0.35s = 22.94s). |
+| **Total** | **262.020s** | **134.00s** | **MEASURED (total baseline: 133.9978s)** | Sum: 1.15s + 103.18s + 6.38s + 0.35s + 22.94s = 134.00s |
+
+### Top 3 Functions by tottime (cProfile output)
+
+From `lfm_load.prof` (ordered by `tottime`):
+
+1. `/content/tpu_v5e_patches.py:474(patch_sys_modules)`
+   - tottime: `172.521s` (MEASURED)
+   - cumtime: `279.000s` (MEASURED)
+   - ncalls: `28694`
+2. `{method 'endswith' of 'str' objects}`
+   - tottime: `38.143s` (MEASURED)
+   - cumtime: `38.143s` (MEASURED)
+   - ncalls: `244378576`
+3. `{method 'startswith' of 'str' objects}`
+   - tottime: `36.682s` (MEASURED)
+   - cumtime: `36.682s` (MEASURED)
+   - ncalls: `244206994`
+
+*(Top 3 Python functions with `file:line`, excluding C built-in methods):*
+1. `/content/tpu_v5e_patches.py:474(patch_sys_modules)` — tottime: `172.521s` (MEASURED), cumtime: `279.000s`, ncalls: `28694`
+2. `/content/tpu_v5e_patches.py:368(_patch_loaded_module)` — tottime: `9.809s` (MEASURED), cumtime: `18.592s`, ncalls: `5241274`
+3. `/dev/shm/vllm_env/lib/python3.12/site-packages/jax/_src/array.py:1232(_array_shard_arg)` — tottime: `4.413s` (MEASURED), cumtime: `4.426s`, ncalls: `796`
+*(Followed by `/dev/shm/vllm_env/lib/python3.12/site-packages/torch/distributed/distributed_c10d.py:2403(get_rank)` — tottime: `4.105s` MEASURED).*
+
 
