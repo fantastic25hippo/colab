@@ -162,11 +162,11 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 
 ## 6. Change Log
 
-- `2026-11-02` **Job 9**: Profiled `config_setup` (11.5 s subprocess in `registry._run_in_subprocess`) and pre-warmup gap (21.9 s JAX/Mosaic lowering); published cache tar `5a0d66f4` (`BEARINGS.md:291-312`, `MEASURED`).
-- `2026-11-02` **Job 10**: Implemented in-process registry inspect (`LFM_INPROC_INSPECT=1`) and fast module patch hook (`LFM_PATCH_FAST=1`); cold compile published cache tar `42f6059b` (`BEARINGS.md:314-329`, `MEASURED`).
-- `2026-11-02` **Job 10b**: Fixed waterfall clock and added early cache miss abort; verified warm restore (`85.44 s` in-VM to first token, 0 misses) on cache tar `42f6059b` (`BEARINGS.md:330-397`, `MEASURED`).
-- `2026-11-02` **Audit A**: Audited live runtime measurements from 100K warm run (`job10b_warm_2.log`, cache `42f6059b`) and established 6-bucket HBM accounting (`AUDIT_A_runtime.md:1-121`, `MEASURED`).
-- `2026-11-02` **Audit B**: Audited all 6 research document groups (G1–G6), verified formulas, and cataloged calculation errors and stale assumptions (`AUDIT_B_research.md:1-289`, `INFERRED`).
-- `2026-11-02` **Audit C**: Adjudicated runtime vs research, proved P1 ShortConv overcount (`2.8626 GiB`) and P3 `int8` feasibility (`1.909 GiB`), and defined 200K target budget (`AUDIT_C_verdict.md:1-111`, `MEASURED`/`INFERRED`).
-- `2026-11-02 Created ARCHITECTURE.md`
+- `2026-11-02` **Job 9**: Profiled `config_setup` (11.5 s subprocess in `registry._run_in_subprocess`) and pre-warmup gap (21.9 s JAX/Mosaic lowering); published cache tar `5a0d66f4` (`BEARINGS.md:291-312`, `MEASURED`, hash: `c3be5a0`).
+- `2026-11-02` **Job 10**: Implemented in-process registry inspect (`LFM_INPROC_INSPECT=1`) and fast module patch hook (`LFM_PATCH_FAST=1`); cold compile published cache tar `42f6059b` (`BEARINGS.md:314-329`, `MEASURED`, hash: `7733fc2`).
+- `2026-11-02` **Job 10b**: Fixed waterfall clock and added early cache miss abort; verified warm restore (`85.44 s` in-VM to first token, 0 misses) on cache tar `42f6059b` (`BEARINGS.md:330-397`, `MEASURED`, hash: `5dab708`).
+- `2026-11-02` **Audit A**: Audited live runtime measurements from 100K warm run (`job10b_warm_2.log`, cache `42f6059b`) and established 6-bucket HBM accounting (`AUDIT_A_runtime.md:1-121`, `MEASURED`, hash: `UNKNOWN`).
+- `2026-11-02` **Audit B**: Audited all 6 research document groups (G1–G6), verified formulas, and cataloged calculation errors and stale assumptions (`AUDIT_B_research.md:1-289`, `INFERRED`, hash: `UNKNOWN`).
+- `2026-11-02` **Audit C**: Adjudicated runtime vs research, proved P1 ShortConv overcount (`2.8626 GiB`) and P3 `int8` feasibility (`1.909 GiB`), and defined 200K target budget (`AUDIT_C_verdict.md:1-111`, `MEASURED`/`INFERRED`, hash: `064a438`).
+- `2026-11-02 Created ARCHITECTURE.md` (hash: `4e5fd46`)
 
