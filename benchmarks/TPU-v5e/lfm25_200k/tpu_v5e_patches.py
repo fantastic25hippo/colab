@@ -365,10 +365,24 @@ def stack_expert_group(tensors, dim=0):
         import numpy as np
         return np.stack(tensors, axis=dim)
 
+_TARGET_PREFIXES = ("tpu_inference",)
+_TARGET_SUFFIXES = ("vllm_model_wrapper",)
+_IMPORT_PREFIXES = ("tpu_inference", "vllm")
+_PHASE_HOOK_SUFFIXES = ("worker.tpu_worker", "runner.compilation_manager")
+_SEEN = set()
+
+def _is_target_module(m_name):
+    return isinstance(m_name, str) and (
+        m_name.startswith(_TARGET_PREFIXES)
+        or m_name.endswith(_TARGET_SUFFIXES)
+        or "short_conv" in m_name
+        or "kv_cache" in m_name
+    )
+
 def _patch_loaded_module(name, mod):
     if not mod: return
     # 2026-11-01: per-phase timers (weight load / KV alloc / compile+warmup).
-    if install_phase_hooks and name.endswith(("worker.tpu_worker", "runner.compilation_manager")):
+    if install_phase_hooks and name.endswith(_PHASE_HOOK_SUFFIXES):
         try: install_phase_hooks()
         except Exception: pass
     if "weight_utils" in name:
@@ -435,7 +449,7 @@ def _patch_loaded_module(name, mod):
         cls = getattr(mod, "ShortConv", None)
         if cls and cls.forward is not _tpu_xla_short_conv_forward:
             cls.forward = _tpu_xla_short_conv_forward
-    if (name.endswith("vllm_model_wrapper") or hasattr(mod, "VllmModelWrapper")) and "context" not in name:
+    if (name.endswith(_TARGET_SUFFIXES) or hasattr(mod, "VllmModelWrapper")) and "context" not in name:
         _patch_vllm_model_wrapper(mod)
     if hasattr(mod, "max_memory_usage_bytes"):
         _patch_kv_cache_utils(mod)
@@ -466,23 +480,44 @@ def _patch_loaded_module(name, mod):
                         return _fn(dev, jnp.bfloat16, *a, **kw)
                 return _fn(dev, dt, *a, **kw)
             _wrap_tbs._is_tuned_patched = True; mod.get_tuned_block_sizes = _wrap_tbs
-    if name.startswith("tpu_inference"):
+    if name.startswith(_TARGET_PREFIXES):
         for c_name in ("TPUModelRunner", "CompilationManager"):
             cls = getattr(mod, c_name, None)
             if cls and hasattr(cls, "_precompile_structured_decoding"): setattr(cls, "_precompile_structured_decoding", lambda self, *a, **kw: None)
 
+_in_patch = False
+
 def patch_sys_modules():
     # from tpu_inference.runner import utils returns the parent; patch via sys.modules.
     # Leave jax.clear_caches live so weight-load JIT is freed before the KV alloc.
-    for m_name, m in list(sys.modules.items()):
-        if m and isinstance(m_name, str) and (m_name.startswith("tpu_inference") or "short_conv" in m_name or m_name.endswith("vllm_model_wrapper") or "kv_cache" in m_name):
-            _patch_loaded_module(m_name, m)
-    _patch_padding_modules()
+    global _in_patch
+    if _in_patch: return
+    _in_patch = True
+    try:
+        _SEEN.intersection_update(sys.modules)
+        new_names = [k for k in list(sys.modules) if k not in _SEEN]
+        for m_name in new_names:
+            m = sys.modules.get(m_name)
+            if m is None: continue
+            spec = getattr(m, "__spec__", None)
+            if getattr(spec, "_initializing", False): continue
+            _SEEN.add(m_name)
+            if _is_target_module(m_name):
+                _patch_loaded_module(m_name, m)
+        _patch_padding_modules()
+    finally:
+        _in_patch = False
 
 def custom_import(name, *args, **kwargs):
     mod = _orig_import(name, *args, **kwargs)
-    if isinstance(name, str) and (name.startswith(("tpu_inference", "vllm")) or "short_conv" in name or "kv_cache" in name):
-        patch_sys_modules()
+    if isinstance(name, str) and (
+        name.startswith(_IMPORT_PREFIXES)
+        or name.endswith(_TARGET_SUFFIXES)
+        or "short_conv" in name
+        or "kv_cache" in name
+    ):
+        if name not in _SEEN or len(sys.modules) != len(_SEEN):
+            patch_sys_modules()
     return mod
 
 def install_all_patches():

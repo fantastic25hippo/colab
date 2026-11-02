@@ -70,6 +70,7 @@ def _cleanup_mock_modules():
         for k, v in orig.items():
             if v is None: sys.modules.pop(k, None)
             else: sys.modules[k] = v
+        P._SEEN.clear()
 
 def test_unset_env_silent_and_returns_orig():
     kv_mod, mgr, wrap = _setup_mock_modules()
@@ -146,3 +147,34 @@ def test_subrunner_wiring_and_no_hf_token():
     assert '"SKIP_JAX_PRECOMPILE": "1"' in subrunner_src
     patches_src = open(os.path.join(here, "tpu_v5e_patches.py")).read()
     assert "HF_TOKEN" not in patches_src
+
+def test_importing_n_dummy_modules_patches_at_most_once():
+    call_counts = {}
+    orig_patch = P._patch_loaded_module
+
+    def spy_patch(name, mod):
+        call_counts[name] = call_counts.get(name, 0) + 1
+        return orig_patch(name, mod)
+
+    N = 25
+    dummy_names = [f"tpu_inference.dummy_submod_{i}" for i in range(N)]
+    _put_mod("tpu_inference")
+    with mock.patch.object(P, "_patch_loaded_module", side_effect=spy_patch):
+        for name in dummy_names:
+            _put_mod(name)
+            P.custom_import(name)
+
+        for _ in range(5):
+            for name in dummy_names:
+                P.custom_import(name)
+            P.patch_sys_modules()
+
+    for name in dummy_names:
+        sys.modules.pop(name, None)
+        P._SEEN.discard(name)
+    sys.modules.pop("tpu_inference", None)
+    P._SEEN.discard("tpu_inference")
+
+    for name in dummy_names:
+        assert call_counts.get(name, 0) <= 1
+        assert call_counts.get(name, 0) == 1

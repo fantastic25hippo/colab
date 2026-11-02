@@ -151,4 +151,35 @@ From `lfm_load.prof` (ordered by `tottime`):
 3. `/dev/shm/vllm_env/lib/python3.12/site-packages/jax/_src/array.py:1232(_array_shard_arg)` — tottime: `4.413s` (MEASURED), cumtime: `4.426s`, ncalls: `796`
 *(Followed by `/dev/shm/vllm_env/lib/python3.12/site-packages/torch/distributed/distributed_c10d.py:2403(get_rank)` — tottime: `4.105s` MEASURED).*
 
+## Part 4: O(new modules) patch_sys_modules Before / After (Job 5)
+
+Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192]`, `SKIP_JAX_PRECOMPILE=1`, `LFM_BEARINGS=1`, `LFM_BEARINGS_STOP=1`, `LFM_PROFILE_LOAD` unset, `FORCE_COLD`, `NO_UPLOAD`.
+
+### Before / After Comparison Table
+
+| Metric | Job 3 (Before, Baseline) | Job 5 (After, O(new modules)) | Speedup / Delta | Status | Evidence / Source |
+|---|---|---|---|---|---|
+| `[LFM_BEARINGS] load CPU vllm_get_model` | 133.9978 s (~134.0 s) | 15.7369 s | **-118.26 s (-88.3%, 8.5x faster)** | MEASURED | `job5_run.log:91` vs `job3.log` |
+| `default_loader.py:501 Loading weights` | 110.71 s | 3.69 s | **-107.02 s (-96.7%, 30.0x faster)** | MEASURED | `job5_run.log:84` vs `job3.log` |
+| `base_loader.py:82 Initializing model` | 11.21 s | 0.30 s | **-10.91 s (-97.3%, 37.4x faster)** | MEASURED | `job5_run.log:60` vs `job3.log` |
+| `[LFM_BEARINGS] load TPU shard_model_to_tpu` | 0.3473 s | 0.3443 s | -0.0030 s (parity) | MEASURED | `job5_run.log:92` (608 tensors) vs `job3.log` |
+| `vllm_model_wrapper:337 Storage to TPU total` | 134.35 s | 16.08 s | **-118.27 s (-88.0%, 8.4x faster)** | MEASURED | `job5_run.log:93` vs `job3.log` |
+| `[LFM25_PHASE] weight_load phase` | 136.87 s | 16.95 s | **-119.92 s (-87.6%, 8.1x faster)** | MEASURED | `job5_run.log:97` vs `job3.log` |
+| In-VM startup to KV early-stop | ~170.0 s | 69.4 s | **-100.6 s (-59.2%, 2.4x faster)** | MEASURED | `job5_run.log:1` (08:03:14) to `job5_run.log:152` (08:04:24) |
+| Total Host Wall Time (`colab exec`) | 226.8 s | 91.3 s | **-135.5 s (-59.7%, 2.5x faster)** | MEASURED | `job5_run.log:122` vs `job3.log` |
+| Cumulative `patch_sys_modules` overhead | ~118.2 s | < 0.05 s | **Eliminated (O(new modules))** | INFERRED | Deduced from 172.5s tottime across 28,694 calls in Job 4 profile |
+
+### Log Citations (Job 5 Live Run)
+- `(MainProcess pid=1962) INFO 11-02 08:04:08 [base_loader.py:82] Initializing model took 0.300700 seconds`
+- `(MainProcess pid=1962) INFO 11-02 08:04:12 [default_loader.py:501] Loading weights took 3.69 seconds`
+- `[LFM_BEARINGS] load CPU vllm_get_model: dur_s=15.7369s`
+- `[LFM_BEARINGS] load TPU shard_model_to_tpu: dur_s=0.3443s tensors_moved=608`
+- `(MainProcess pid=1962) INFO 11-02 08:04:24 [vllm_model_wrapper.py:337] Total time to load model weights from storage to TPU: 16.08 seconds.`
+- `[LFM_BEARINGS] HBM after load_weights: used=12.447 GiB (13365066752 B), free=3.301 GiB (3544269312 B)`
+- `[LFM25_PHASE] weight_load dur_s=16.95 start_rel=37.45`
+- `[LFM_BEARINGS] KV total_gib=2.0409 (2191441920 bytes)`
+- `[LFM_BEARINGS] HBM after KV allocation: used=14.488 GiB (15556598272 B), free=1.260 GiB (1352737792 B)`
+- `=== EXEC finished rc=0 wall=91.3s ===`
+
+
 
