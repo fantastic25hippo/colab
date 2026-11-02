@@ -78,6 +78,25 @@ t_imp0 = time.time()
 log_sub(f"Importing jax and vllm for LFM2.5-24B-A2B ({ctx_k} context)...")
 t0 = time.time(); import jax; log_sub(f"import jax: {time.time() - t0:.2f}s")
 t0 = time.time(); from vllm import LLM, SamplingParams; log_sub(f"import vllm: {time.time() - t0:.2f}s")
+_wf_meta = {}
+try:
+    import vllm.model_executor.models.registry as _vreg
+    _orig_run_sub = _vreg._run_in_subprocess
+    def _timed_run_sub(*a, **kw):
+        t_sub0 = time.perf_counter()
+        try: return _orig_run_sub(*a, **kw)
+        finally: _wf_meta["model_inspect_s"] = round(time.perf_counter() - t_sub0, 4)
+    _vreg._run_in_subprocess = _timed_run_sub
+except Exception: pass
+try:
+    import transformers.models.auto.tokenization_auto as _ta
+    _orig_from_pretrained = _ta.AutoTokenizer.from_pretrained
+    def _timed_tok_pretrained(*a, **kw):
+        t_tok0 = time.perf_counter()
+        try: return _orig_from_pretrained(*a, **kw)
+        finally: _wf_meta["tokenizer_s"] = round(time.perf_counter() - t_tok0, 4)
+    _ta.AutoTokenizer.from_pretrained = _timed_tok_pretrained
+except Exception: pass
 t_import_s = time.time() - t_imp0
 log_sub(f"TPU init complete in {t_import_s:.2f}s: {jax.devices()}")
 
@@ -112,18 +131,21 @@ class _CfgHandler(logging.Handler):
 _cfgh = _CfgHandler(level=logging.INFO)
 _loggers = [logging.getLogger(), logging.getLogger("vllm"), logging.getLogger("vllm.v1.engine.core")]
 for _lg in _loggers: _lg.addHandler(_cfgh)
+import vllm.engine.arg_utils as _au
+_orig_cec = _au.EngineArgs.create_engine_config
+def _wf_cec(self, *a, **kw):
+    t0 = time.perf_counter()
+    try: return _orig_cec(self, *a, **kw)
+    finally: _wf_meta["create_engine_config_s"] = round(time.perf_counter() - t0, 4)
+_au.EngineArgs.create_engine_config = _wf_cec
 if _diag_on:
-    import vllm.engine.arg_utils as _au, vllm.v1.engine.core as _ec
-    _orig_cec, _orig_eci = _au.EngineArgs.create_engine_config, _ec.EngineCore.__init__
-    def _d_cec(self, *a, **kw):
-        t0 = time.perf_counter()
-        try: return _orig_cec(self, *a, **kw)
-        finally: _diag_meta["create_engine_config_s"] = round(time.perf_counter() - t0, 4)
+    import vllm.v1.engine.core as _ec
+    _orig_eci = _ec.EngineCore.__init__
     def _d_eci(self, *a, **kw):
         global config_setup_s
         if config_setup_s is None: config_setup_s = round(time.perf_counter() - t_eng0, 2); log_sub(f"[LFM_DIAG] EngineCore.__init__ reached: config_setup_s={config_setup_s:.2f}s (t_rel={time.time()-_t_g0:.2f}s)")
         return _orig_eci(self, *a, **kw)
-    _au.EngineArgs.create_engine_config, _ec.EngineCore.__init__ = _d_cec, _d_eci
+    _ec.EngineCore.__init__ = _d_eci
 try:
     # 2026-11-01: kv_cache_dtype left at the default ("auto" -> bf16). fp8 is NOT re-enabled.
     if os.environ.get("LFM_PROFILE_LOAD") == "1":
@@ -140,7 +162,10 @@ except Exception as e:
     err = f"{type(e).__name__}: {e}"
 finally:
     for _lg in _loggers: _lg.removeHandler(_cfgh)
-    if _diag_on: _au.EngineArgs.create_engine_config, _ec.EngineCore.__init__ = _orig_cec, _orig_eci
+    _au.EngineArgs.create_engine_config = _orig_cec
+    if _diag_on: _ec.EngineCore.__init__ = _orig_eci
+    if _diag_meta is not None and "create_engine_config_s" in _wf_meta:
+        _diag_meta["create_engine_config_s"] = _wf_meta["create_engine_config_s"]
 init_dur = time.perf_counter() - t_eng0
 cache_after = dir_stats(cache_dir)
 
@@ -185,6 +210,61 @@ log_sub(f"Engine ready in {init_dur:.2f}s; weight_load={phases['weight_load_s']}
         f"kv_alloc={phases['kv_alloc_s']}s compile_warmup={phases['compile_warmup_s']}s; "
         f"kv_dtype={base['kv_cache_dtype_resolved']}; HBM={get_hbm()}")
 
+def _emit_waterfall(res, first_tok_ts, ttft_s):
+    t_vm0 = t_imp0
+    total_vm_s = max(0.0, (first_tok_ts or time.time()) - t_vm0)
+    rows = []
+    def _add(name, t_start, dur):
+        if dur is not None and dur > 0 and t_start is not None:
+            s_rel = max(0.0, t_start - t_vm0)
+            rows.append({"name": name, "start_rel": round(s_rel, 3), "dur_s": round(dur, 3), "end_rel": round(s_rel + dur, 3)})
+
+    _add("imports_and_tpu_init", t_imp0, t_import_s)
+    if t_wait_s > 0.05: _add("wait_for_weights", t_wait0, t_wait_s)
+    if config_setup_s is not None: _add("config_setup", t_cfg0, config_setup_s)
+    for k in ["create_engine_config_s", "model_inspect_s", "tokenizer_s"]:
+        if _wf_meta.get(k): _add(k.replace("_s", ""), t_cfg0, _wf_meta[k])
+
+    for s in spans:
+        s_ts = s.get("ts") or (t_cfg0 if s.get("start_rel") is None else (t_cfg0 + s["start_rel"]))
+        _add(s["name"], s_ts, s.get("dur_s"))
+
+    if ttft_s is not None:
+        ttft_start = (first_tok_ts - ttft_s) if first_tok_ts else time.time()
+        _add("ttft", ttft_start, ttft_s)
+
+    rows.sort(key=lambda r: (r["start_rel"], r["end_rel"]))
+    intervals = []
+    for r in rows:
+        st, en = r["start_rel"], r["end_rel"]
+        if not intervals or st > intervals[-1][1]:
+            intervals.append([st, en])
+        else:
+            intervals[-1][1] = max(intervals[-1][1], en)
+    accounted_s = round(sum(en - st for st, en in intervals), 3)
+    unaccounted_s = round(max(0.0, total_vm_s - accounted_s), 3)
+
+    gaps = []
+    last_end = 0.0
+    for st, en in intervals:
+        gap = round(st - last_end, 3)
+        if gap > 0.05:
+            gaps.append({"after": last_end, "before": st, "gap_s": gap})
+        last_end = max(last_end, en)
+    if total_vm_s - last_end > 0.05:
+        gaps.append({"after": last_end, "before": round(total_vm_s, 3), "gap_s": round(total_vm_s - last_end, 3)})
+
+    log_sub(f"[WATERFALL] total_vm_s={total_vm_s:.2f}s accounted_s={accounted_s:.2f}s unaccounted_s={unaccounted_s:.2f}s")
+    for r in rows:
+        log_sub(f"  {r['start_rel']:7.2f}s - {r['end_rel']:7.2f}s ({r['dur_s']:6.2f}s): {r['name']}")
+
+    res["waterfall"] = rows
+    res["t_vm0"] = t_vm0
+    res["accounted_s"] = accounted_s
+    res["unaccounted_s"] = unaccounted_s
+    res["unaccounted_gaps"] = gaps
+    return res
+
 p_short = "Explain the fundamental principles of astrophysics and stellar evolution."
 msgs = [{"role": "user", "content": p_short}]
 sp_ttft = SamplingParams(max_tokens=1, temperature=0.0, ignore_eos=True)
@@ -227,6 +307,7 @@ if os.environ.get("LFM_SHORT_REQUEST") == "1":
     results = dict(base, first_token_ts=first_tok_ts,
                    short_request={"ttft_s": round(ttft_s, 4), "latency_s": round(lat_s, 4), "n_tokens": len(tok_ids), "text": txt},
                    hbm_stats=get_hbm(), log_timeline=timeline.rows, **({"diag_meta": _diag_meta} if _diag_meta else {}))
+    _emit_waterfall(results, first_tok_ts, ttft_s)
     write_results(results)
     log_sub("Engine short request complete")
     sys.exit(0)
@@ -337,5 +418,6 @@ results = dict(base, first_token_ts=first_tok_ts, ttft_short_s=short.get("ttft_s
                    "chat coherence run: greedy, max_tokens=64, no ignore_eos/min_tokens/seed",
                    "64-token decode runs set ignore_eos=True: throughput timing only, text not judged",
                    "kv_cache_dtype is vLLM's default (auto); fp8 is not enabled"])
+_emit_waterfall(results, first_tok_ts, short.get("ttft_s"))
 write_results(results)
 log_sub("Engine benchmarking complete")

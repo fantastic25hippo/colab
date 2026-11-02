@@ -1,5 +1,8 @@
 import base64, concurrent.futures, hashlib, json, os, re, subprocess, sys, threading, time
 
+hf_anon = os.environ.get("LFM_HF_ANON", "1") != "0"
+dl_token = False if hf_anon else os.environ.get("HF_TOKEN")
+
 hb_stop = threading.Event()
 def hb():
     while not hb_stop.wait(15): print(json.dumps({"stage": "hb", "t": time.time()}), flush=True)
@@ -14,6 +17,9 @@ def log(m):
 
 t_vm0 = time.time()
 t_global0 = float(os.environ.get("T0_GLOBAL", t_vm0))
+t_session_connect0 = float(os.environ.get("T_SESSION_CONNECT0", t_global0))
+t_upload0 = float(os.environ.get("T_UPLOAD0", t_session_connect0))
+t_exec0 = float(os.environ.get("T_EXEC0", t_upload0))
 
 # Unpack subrunner, patches, pallas kernel, prompt builder, startup + cache helpers.
 diag = os.environ.get("LFM_DIAG") == "1"
@@ -66,25 +72,30 @@ if os.path.exists("/dev/shm/.weights_ready"): os.remove("/dev/shm/.weights_ready
 
 def dl_venv():
     t0 = time.time()
+    if hf_anon:
+        log("[LFM_HF_ANON] download token=none venv312_cpu.tar.zst")
+        log("[LFM_HF_ANON] download token=none zstd_bin")
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as p_dl:
         f_v = p_dl.submit(hf_hub_download, repo_id="avgrocketman/tpu-compile-cache",
-                          filename="venv312_cpu.tar.zst", local_dir="/dev/shm")
+                          filename="venv312_cpu.tar.zst", local_dir="/dev/shm", token=dl_token)
         f_z = p_dl.submit(hf_hub_download, repo_id="avgrocketman/tpu-compile-cache",
-                          filename="zstd_bin", local_dir="/dev/shm")
+                          filename="zstd_bin", local_dir="/dev/shm", token=dl_token)
         p_venv, p_zstd = f_v.result(), f_z.result()
     os.chmod(p_zstd, 0o755)
-    dur = round(time.time() - t0, 2)
+    t_end = time.time()
+    dur = round(t_end - t0, 2)
     log(f"Downloaded venv + zstd_bin in {dur}s (no Qwen XLA cache for LFM)")
-    return p_venv, p_zstd, dur
+    return p_venv, p_zstd, dur, t0, t_end
 
 def unpack_venv(p_venv, p_zstd):
     t_u0 = time.time()
     subprocess.run(["sh", "-c", f"{p_zstd} -d -T0 -c {p_venv} | tar -xf - -C /dev/shm"], check=True)
     try: os.remove(p_venv)
     except Exception: pass
-    dur = round(time.time() - t_u0, 2)
+    t_u_end = time.time()
+    dur = round(t_u_end - t_u0, 2)
     log(f"Unpacked venv in {dur}s")
-    return dur
+    return dur, t_u0, t_u_end
 
 def weight_manifest(root):
     files = sorted(f for f in os.listdir(root) if f.endswith(".safetensors"))
@@ -108,16 +119,19 @@ def shm_read_probe(path, limit=1024**3):
 def dl_weights():
     t0 = time.time()
     model_id = os.environ.get("LFM25_MODEL_ID", "avgrocketman/LFM2.5-24B-A2B-W8A8-W4A16-TPU")
-    snapshot_download(model_id, local_dir="/dev/shm/lfm25_200k", max_workers=12)
+    if hf_anon: log(f"[LFM_HF_ANON] download token=none {model_id}")
+    snapshot_download(model_id, local_dir="/dev/shm/lfm25_200k", max_workers=12, token=dl_token)
     cfg_p = "/dev/shm/lfm25_200k/config.json"
     if os.path.exists(cfg_p):
         with open(cfg_p) as f: c = json.load(f)
         if "layer_types" not in c or not c["layer_types"]:
             c["layer_types"] = ["full_attention" if i in (2, 6, 10, 14, 18, 22, 26, 30, 34, 38) else "conv" for i in range(40)]
             with open(cfg_p, "w") as f: json.dump(c, f, indent=2)
-    dur = time.time() - t0
+    t_end = time.time()
+    dur = t_end - t0
     man = weight_manifest("/dev/shm/lfm25_200k")
     man["dl_s"] = round(dur, 2)
+    man["t_start"], man["t_end"] = t0, t_end
     man["mb_s"] = round(man["total_mb"] / max(dur, 1e-6), 1)
     if man["largest"]: man["shm_read_probe"] = shm_read_probe(os.path.join("/dev/shm/lfm25_200k", man["largest"]))
     with open("/dev/shm/.weights_ready", "w") as f: f.write("1\n")
@@ -126,24 +140,32 @@ def dl_weights():
 
 def dl_and_unpack_cache(c_name, a_str):
     t_c0 = time.time()
+    t_dl_end = t_u0 = t_u_end = None
     try:
+        if hf_anon: log(f"[LFM_HF_ANON] download token=none {c_name}")
         p_tar = hf_hub_download(repo_id="avgrocketman/tpu-compile-cache",
-                                filename=c_name, local_dir="/dev/shm")
-        t_dl = round(time.time() - t_c0, 2)
+                                filename=c_name, local_dir="/dev/shm", token=dl_token)
+        t_dl_end = time.time()
+        t_dl = round(t_dl_end - t_c0, 2)
         t_u0 = time.time()
         r = subprocess.run(["tar", "-xf", p_tar, "-C", "/dev/shm"], capture_output=True, text=True)
-        t_unp = round(time.time() - t_u0, 2)
+        t_u_end = time.time()
+        t_unp = round(t_u_end - t_u0, 2)
         try: os.remove(p_tar)
         except Exception: pass
         if r.returncode != 0:
             clean_dir()
             res = {"hit": False, "reason": f"tar unpack failed rc={r.returncode}: {r.stderr}",
-                   "cache_dl_s": t_dl, "cache_unpack_s": t_unp}
+                   "cache_dl_s": t_dl, "cache_unpack_s": t_unp,
+                   "t_dl_start": t_c0, "t_dl_end": t_dl_end, "t_unp_start": t_u0, "t_unp_end": t_u_end}
         else:
-            res = {"hit": True, "cache_dl_s": t_dl, "cache_unpack_s": t_unp}
+            res = {"hit": True, "cache_dl_s": t_dl, "cache_unpack_s": t_unp,
+                   "t_dl_start": t_c0, "t_dl_end": t_dl_end, "t_unp_start": t_u0, "t_unp_end": t_u_end}
     except Exception as e:
         clean_dir()
-        res = {"hit": False, "reason": str(e), "cache_dl_s": round(time.time() - t_c0, 2)}
+        t_dl_end = time.time()
+        res = {"hit": False, "reason": str(e), "cache_dl_s": round(t_dl_end - t_c0, 2),
+               "t_dl_start": t_c0, "t_dl_end": t_dl_end}
     res.update({"filename": c_name, "vllm": "0.32.0", "key_args": a_str, "dir": dir_stats()})
     c_dl = res.get("cache_dl_s", res.get("dl_s"))
     c_unp = res.get("cache_unpack_s", res.get("unpack_s"))
@@ -188,8 +210,8 @@ if par_cache:
     else:
         f_cache = pool.submit(dl_and_unpack_cache, cache_name, args_str)
 
-p_v, p_z, t_venv_dl = dl_venv()
-t_venv_unp = unpack_venv(p_v, p_z)
+p_v, p_z, t_venv_dl, t_vdl0, t_vdl1 = dl_venv()
+t_venv_unp, t_vunp0, t_vunp1 = unpack_venv(p_v, p_z)
 
 if not par_cache:
     ver = read_vllm_version("/dev/shm/vllm_env")
@@ -198,7 +220,14 @@ if not par_cache:
         clean_dir()
         cache_res = {"hit": False, "reason": "diag" if diag else "LFM_CACHE_FORCE_COLD=1"}
     else:
-        cache_res = restore_cache(cache_name)
+        if hf_anon: log(f"[LFM_HF_ANON] download token=none {cache_name}")
+        try:
+            cache_res = restore_cache(cache_name, token=dl_token)
+        except TypeError:
+            _hf = os.environ.pop("HF_TOKEN", None) if hf_anon else None
+            try: cache_res = restore_cache(cache_name)
+            finally:
+                if _hf is not None: os.environ["HF_TOKEN"] = _hf
     if not cache_res.get("hit"):
         clean_dir()
         log(f"cache miss: {cache_name}")
@@ -211,6 +240,25 @@ setup_thp()
 
 if not early_imp and f_cache:
     cache_res = f_cache.result()
+
+abort_on_miss = os.environ.get("LFM_ABORT_ON_CACHE_MISS", "1") != "0"
+if abort_on_miss and cache_res and not cache_res.get("hit"):
+    c_name = cache_res.get("filename", cache_name)
+    reason = cache_res.get("reason", "unknown")
+    log(f"ABORT ON CACHE MISS: filename={c_name} reason={reason}")
+    summary = {
+        "ok": False,
+        "error": f"compile cache miss: {c_name} (reason: {reason})",
+        "cache_miss": True,
+        "cache_restore": cache_res,
+        "filename": c_name,
+        "reason": reason,
+    }
+    print("=== COLDSTART_RESULTS_JSONL ===", flush=True)
+    print(json.dumps(summary), flush=True)
+    print("=== END_COLDSTART_RESULTS ===", flush=True)
+    hb_stop.set()
+    sys.exit(2)
 
 t_spawn = time.time()
 startup = {"remount_s": round(t_remount, 2), "venv_dl_s": t_venv_dl, "venv_unpack_s": t_venv_unp,
@@ -267,12 +315,73 @@ if not diag and cache_res and not cache_res.get("hit") and eng_data.get("ok") an
 
 startup["weights"] = wt_res
 first_tok_ts = eng_data.get("first_token_ts")
+
+# --- Host WATERFALL computation ---
+# Host rows: session connect, upload, EXEC start, venv dl, venv unpack, weights dl, cache dl, cache unpack.
+# Then in-VM rows from subrunner JSON (shifted by t_vm0 - t_global0). Then TTFT.
+waterfall_rows = []
+def _add_phase(name, t_s, t_e, origin="host"):
+    if t_s is not None and t_e is not None and t_e >= t_s:
+        waterfall_rows.append({"name": name, "start_rel": round(t_s - t_global0, 3), "dur_s": round(t_e - t_s, 3), "end_rel": round(t_e - t_global0, 3), "origin": origin})
+
+# Host phases
+for n, s, e in [("session connect", t_session_connect0, t_upload0), ("upload", t_upload0, t_exec0), ("EXEC start", t_exec0, t_vm0)]:
+    if e > s: _add_phase(n, s, e)
+_add_phase("venv dl", t_vdl0, t_vdl1); _add_phase("venv unpack", t_vunp0, t_vunp1)
+if wt_res.get("t_start") and wt_res.get("t_end"): _add_phase("weights dl", wt_res["t_start"], wt_res["t_end"])
+if cache_res:
+    for n, k in [("cache dl", "t_dl"), ("cache unpack", "t_unp")]:
+        if cache_res.get(f"{k}_start") and cache_res.get(f"{k}_end"): _add_phase(n, cache_res[f"{k}_start"], cache_res[f"{k}_end"])
+
+# Subrunner in-VM rows
+vm_off = round(float(eng_data.get("t_vm0") or t_vm0) - t_global0, 3)
+for r in eng_data.get("waterfall", []):
+    waterfall_rows.append({"name": r.get("name", ""), "start_rel": round(r.get("start_rel", 0.0) + vm_off, 3), "dur_s": round(r.get("dur_s", 0.0), 3), "end_rel": round(r.get("end_rel", 0.0) + vm_off, 3), "origin": "in-vm"})
+
+# TTFT row (only if not already provided by subrunner waterfall)
+has_ttft = any(r.get("name") == "TTFT" for r in eng_data.get("waterfall", []))
+ttft_s = eng_data.get("ttft_short_s") or eng_data.get("short", {}).get("ttft_s")
+if not has_ttft and first_tok_ts and ttft_s is not None: _add_phase("TTFT", first_tok_ts - ttft_s, first_tok_ts, origin="in-vm")
+
+# Sort waterfall rows by start_rel then end_rel & calculate non-overlapping merged intervals
+waterfall_rows.sort(key=lambda r: (r["start_rel"], r["end_rel"]))
+merged_intervals = []
+for r in waterfall_rows:
+    s, e = r["start_rel"], r["end_rel"]
+    if merged_intervals and s <= merged_intervals[-1][1]: merged_intervals[-1][1] = max(merged_intervals[-1][1], e)
+    else: merged_intervals.append([s, e])
+
+accounted_s = round(sum(e - s for s, e in merged_intervals), 3)
+total_s = round(first_tok_ts - t_global0, 3) if first_tok_ts else (merged_intervals[-1][1] if merged_intervals else 0.0)
+unaccounted_s = round(max(0.0, total_s - accounted_s), 3)
+
+unaccounted_gaps = []
+for i in range(len(merged_intervals) - 1):
+    gap = round(merged_intervals[i+1][0] - merged_intervals[i][1], 3)
+    if gap > 0.001:
+        aft = next((r["name"] for r in waterfall_rows if abs(r["end_rel"] - merged_intervals[i][1]) < 0.005), f"{merged_intervals[i][1]:.3f}s")
+        bef = next((r["name"] for r in waterfall_rows if abs(r["start_rel"] - merged_intervals[i+1][0]) < 0.005), f"{merged_intervals[i+1][0]:.3f}s")
+        unaccounted_gaps.append({"after": aft, "before": bef, "gap_s": gap})
+
+log("=== Host WATERFALL ===")
+log(f"{'Phase':<24} | {'Start (s)':<10} | {'Dur (s)':<10} | {'End (s)':<10} | {'Origin':<8}")
+log("-" * 72)
+for r in waterfall_rows: log(f"{r['name']:<24} | {r['start_rel']:<10.3f} | {r['dur_s']:<10.3f} | {r['end_rel']:<10.3f} | {r['origin']:<8}")
+log("-" * 72)
+log(f"accounted_s = {accounted_s:.3f} s (sum of non-overlapping phase durations)")
+log(f"unaccounted_s = {unaccounted_s:.3f} s (total = {total_s:.3f} s)")
+if unaccounted_gaps: log(f"unaccounted_gaps = {unaccounted_gaps}")
+
 summary = {
     "run_label": os.environ.get("LFM_RUN_LABEL", ""), "diag": diag,
     "startup": startup,
     "weights_dl_s": wt_res.get("dl_s"),
     "in_vm_cold_start_to_first_token_s": round(first_tok_ts - t_vm0, 2) if first_tok_ts else None,
     "total_cold_start_to_first_token_s": round(first_tok_ts - t_global0, 2) if first_tok_ts else None,
+    "accounted_s": accounted_s,
+    "unaccounted_s": unaccounted_s,
+    "unaccounted_gaps": unaccounted_gaps,
+    "waterfall": waterfall_rows,
     "engine": eng_data, "cache_publish": pub, "subrunner_rc": proc.returncode,
 }
 print("=== COLDSTART_RESULTS_JSONL ===", flush=True)

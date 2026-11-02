@@ -311,9 +311,18 @@ Environment: TPU v5e-1 (`tpu-lfm25`), `max_model_len=100000`, `SKIP_JAX_PRECOMPI
 - **W2 Diagnosis (`INFERRED` from `MEASURED` stacks)**: Host CPU symbolic tracing (`torch.compile` + `torchax` + JAX `pjit`) and MLIR/Mosaic lowering (`lowered = fn.lower(*args, **call_kwargs)`) inside `CompilationManager._run_compilation` (`tpu-inference/tpu_inference/runner/compilation_manager.py:190`), plus cache lookup (`lowered.compile()` at `:209`, 0.34 s for bucket 16 and 1.56 s for bucket 8192), invoked from `capture_model` (`:272-273`). Bucket 16 takes ~8.0 s (`4.96 s` in `torch.compile` at `monitor.py:62` + `2.7 s` JAX lowering + `0.34 s` cache read); bucket 8192 takes ~13.9 s (`~12.3 s` JAX/Pallas/GMM v2 lowering + `1.56 s` cache decompress). Warmup tasks only run after both buckets finish lowering, inside `_flush_compilations()` (`:248-255`).
 - **Overhead Check (`MEASURED`)**: `llm_init_s` `71.80 s` (vs `69.42 s` Job 8; `+2.38 s` from 1 Hz `py-spy` ptrace attach; `compile_warmup_s` `32.81 s` vs `31.61 s`, `+1.19 s`); in-VM total `113.11 s` (vs `107.86 s` Job 8, including `+2.73 s` pre-subrunner HF `venv_dl_s` variance `11.54 s` vs `8.81 s`; in-subrunner delta `+2.52 s`); host total `122.15 s` (vs `118.35 s`); host EXEC wall `136.1 s` (vs `122.6 s`, includes post-run stdout tar transfer of 77 stack files).
 
+## Part 9: Job 10 in-process inspect, patch-fast, anon HF, waterfall
 
+Label every number MEASURED or INFERRED. Facts from job10_warm_1.log (run 2 skipped):
 
+STOP: cache key changed with tpu_v5e_patches.py. Job 9 tar `...__5a0d66f4.tar`. Run 1 requested `...__42f6059b.tar`, 404 miss (MEASURED). LFM_ABORT_ON_CACHE_MISS sat after LFM_EARLY_IMPORT spawn, so run 1 still cold-compiled and published `42f6059b` (MEASURED; 196.1 MB, upload_s=2.99, verified_listed=true). Run 2 skipped.
 
-
-
-
+Run 1 vs Job 8 warm (107.86 / 118.35 / 122.6) — this run is a COLD compile, not a warm restore:
+- config_setup_s JSON null (MEASURED; `_CfgHandler` detached). LLM() 11:29:20 to "Initializing a V1 LLM engine" 11:29:25 ~5 s (INFERRED) vs Job 9 19.15 s.
+- create_engine_config_s=0.159 s, tokenizer_s=1.018 s (MEASURED). model_inspect_s absent from waterfall.
+- [LFM_INPROC_INSPECT] active three times; architecture resolved in-process at 11:29:23 (MEASURED).
+- in-VM 196.76 s, host 206.28 s, EXEC 214.2 s (MEASURED). compile_warmup_s=125.862 s (MEASURED cold).
+- cache hits=0. HF downloads logged token=none for weights, venv312_cpu.tar.zst, zstd_bin, cache tar (MEASURED). Publish kept token (upload ran).
+- Host WATERFALL unaccounted_s=40.205 s (MEASURED). Gaps: EXEC start→cache dl 0.957 s; venv unpack→imports 3.943 s; imports→precompile_load 3.755 s; compile_warmup→ttft 31.55 s. in-VM unaccounted_s=35.305 s. Goal missed: PHASE rows all pinned at start_rel=16.856 s (INFERRED clock bug).
+- THP FAIL read-only sysfs (MEASURED). HF Hub warned unauthenticated requests (MEASURED).
+- Tell Sahil to check https://huggingface.co/settings/downloads ; do not log in.

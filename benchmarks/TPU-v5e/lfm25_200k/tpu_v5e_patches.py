@@ -564,6 +564,35 @@ def _patch_loaded_module(name, mod):
         for c_name in ("TPUModelRunner", "CompilationManager"):
             cls = getattr(mod, c_name, None)
             if cls and hasattr(cls, "_precompile_structured_decoding"): setattr(cls, "_precompile_structured_decoding", lambda self, *a, **kw: None)
+    if "registry" in name or hasattr(mod, "_run_in_subprocess"):
+        _patch_inproc_inspect(mod)
+
+def _patch_inproc_inspect(mod=None):
+    if os.environ.get("LFM_INPROC_INSPECT", "1") == "0":
+        return
+    if mod is None:
+        mod = sys.modules.get("vllm.model_executor.models.registry")
+    if mod is None or not hasattr(mod, "_run_in_subprocess"):
+        return
+    orig_run = getattr(mod, "_run_in_subprocess")
+    if getattr(orig_run, "_inproc_patched", False):
+        return
+    orig_fn = getattr(orig_run, "_orig_fn", orig_run)
+    print("[LFM_INPROC_INSPECT] active", flush=True)
+    def _inproc_run_in_subprocess(fn, *args, **kwargs):
+        if os.environ.get("LFM_INPROC_INSPECT", "1") == "0":
+            return orig_fn(fn, *args, **kwargs)
+        if not getattr(_inproc_run_in_subprocess, "_logged", False):
+            _inproc_run_in_subprocess._logged = True
+            print("[LFM_INPROC_INSPECT] active", flush=True)
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            logging.getLogger("tpu_v5e_patches").error(f"[LFM_INPROC_INSPECT] fallback error: {e}")
+            return orig_fn(fn, *args, **kwargs)
+    _inproc_run_in_subprocess._inproc_patched = True
+    _inproc_run_in_subprocess._orig_fn = orig_fn
+    mod._run_in_subprocess = _inproc_run_in_subprocess
 
 _in_patch = False
 
@@ -585,6 +614,7 @@ def patch_sys_modules():
             if _is_target_module(m_name):
                 _patch_loaded_module(m_name, m)
         _patch_padding_modules()
+        _patch_inproc_inspect()
     finally:
         _in_patch = False
 
@@ -596,11 +626,16 @@ def custom_import(name, *args, **kwargs):
         or "short_conv" in name
         or "kv_cache" in name
     ):
-        if name not in _SEEN or len(sys.modules) != len(_SEEN):
-            patch_sys_modules()
+        if os.environ.get("LFM_PATCH_FAST", "1") != "0":
+            if name not in _SEEN:
+                patch_sys_modules()
+        else:
+            if name not in _SEEN or len(sys.modules) != len(_SEEN):
+                patch_sys_modules()
     return mod
 
 def install_all_patches():
     builtins.__import__ = custom_import
     _install_tpu_runner_warning_filter()
+    _patch_inproc_inspect()
     patch_sys_modules()

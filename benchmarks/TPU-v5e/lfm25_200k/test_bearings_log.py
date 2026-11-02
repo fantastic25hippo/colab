@@ -206,6 +206,84 @@ def test_in_vm_total_non_null_from_fake_timestamps():
     idx_req = subrunner_src.find("LFM_SHORT_REQUEST")
     assert idx_req != -1
     assert "first_tok_ts = time.time()" in subrunner_src[idx_req:] or "first_token_ts = time.time()" in subrunner_src[idx_req:]
+    assert "_emit_waterfall" in subrunner_src
+    assert '"waterfall"' in subrunner_src
+    assert '"accounted_s"' in subrunner_src
+    assert '"t_vm0"' in subrunner_src
+
+
+
+def test_lfm_inproc_inspect_on_and_off():
+    orig_called = []
+    def fake_subprocess(fn):
+        orig_called.append("subprocess")
+        return "subprocess_result"
+
+    reg_mod = _put_mod("vllm.model_executor.models.registry", _run_in_subprocess=fake_subprocess)
+    P._patch_inproc_inspect(reg_mod)
+
+    # Flag on (default)
+    buf = io.StringIO()
+    with mock.patch.dict(os.environ, {"LFM_INPROC_INSPECT": "1"}, clear=False):
+        with contextlib.redirect_stdout(buf):
+            res = reg_mod._run_in_subprocess(lambda: "inproc_result")
+    assert res == "inproc_result"
+    assert "[LFM_INPROC_INSPECT] active" in buf.getvalue()
+    assert orig_called == []
+
+    # Flag on fallback when fn() raises
+    buf = io.StringIO()
+    def failing_fn(): raise ValueError("forced boom")
+    with mock.patch.dict(os.environ, {"LFM_INPROC_INSPECT": "1"}, clear=False):
+        with contextlib.redirect_stdout(buf):
+            res = reg_mod._run_in_subprocess(failing_fn)
+    assert res == "subprocess_result"
+    assert orig_called == ["subprocess"]
+
+    # Flag off
+    orig_called.clear()
+    buf = io.StringIO()
+    with mock.patch.dict(os.environ, {"LFM_INPROC_INSPECT": "0"}, clear=False):
+        with contextlib.redirect_stdout(buf):
+            res = reg_mod._run_in_subprocess(lambda: "direct_result")
+    assert res == "subprocess_result"
+    assert orig_called == ["subprocess"]
+    assert "[LFM_INPROC_INSPECT] active" not in buf.getvalue()
+
+
+def test_lfm_patch_fast_on_and_off():
+    mod_name = "tpu_inference.dummy_handled_mod"
+    _put_mod(mod_name)
+    P._SEEN.add(mod_name)
+    assert len(sys.modules) != len(P._SEEN)
+
+    # Flag on (default): custom_import skips already-handled module
+    with mock.patch.dict(os.environ, {"LFM_PATCH_FAST": "1"}, clear=False):
+        with mock.patch.object(P, "patch_sys_modules") as mock_psm:
+            P.custom_import(mod_name)
+            mock_psm.assert_not_called()
+
+    # Flag off: custom_import calls patch_sys_modules because len(sys.modules) != len(_SEEN)
+    with mock.patch.dict(os.environ, {"LFM_PATCH_FAST": "0"}, clear=False):
+        with mock.patch.object(P, "patch_sys_modules") as mock_psm:
+            P.custom_import(mod_name)
+            mock_psm.assert_called_once()
+
+    # Unhandled module: custom_import calls patch_sys_modules even with flag on
+    unhandled = "tpu_inference.dummy_unhandled_mod"
+    _put_mod(unhandled)
+    P._SEEN.discard(unhandled)
+    with mock.patch.dict(os.environ, {"LFM_PATCH_FAST": "1"}, clear=False):
+        with mock.patch.object(P, "patch_sys_modules") as mock_psm:
+            P.custom_import(unhandled)
+            mock_psm.assert_called_once()
+
+    sys.modules.pop(mod_name, None)
+    sys.modules.pop(unhandled, None)
+    P._SEEN.discard(mod_name)
+    P._SEEN.discard(unhandled)
+
+
 
 
 
