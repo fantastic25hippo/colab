@@ -20,7 +20,7 @@ for _m, _attrs in (
     if _m not in sys.modules:
         mod = types.ModuleType(_m); [setattr(mod, k, v) for k, v in _attrs.items()]; sys.modules[_m] = mod
 
-import tpu_v5e_patches  # noqa: E402
+import kv_int8, tpu_v5e_patches  # noqa: E402
 from tpu_inference import utils as tpu_utils  # noqa: E402
 from tpu_inference.kernels.ragged_paged_attention.v3 import kernel_hd64  # noqa: E402
 from tpu_inference.layers.common import quantization as quant_mod  # noqa: E402
@@ -29,11 +29,10 @@ from tpu_inference.layers.common.quantization import quantize_kv  # noqa: E402
 
 def test_3a_int8_kv_cache_shape_and_flag(monkeypatch):
     monkeypatch.delenv("LFM_KV_INT8", raising=False)
+    kv_int8.apply()
     assert tpu_utils.to_jax_dtype("fp8") == jnp.float8_e4m3fn.dtype
     monkeypatch.setenv("LFM_KV_INT8", "1")
-    tpu_v5e_patches._patch_kv_int8("tpu_inference.utils", tpu_utils)
-    tpu_v5e_patches._patch_kv_int8("quantization", quant_mod)
-    tpu_v5e_patches._patch_kv_int8("kernel_hd64", kernel_hd64)
+    kv_int8.apply()
     assert tpu_utils.to_jax_dtype("fp8") == jnp.int8.dtype
     src = getattr(kernel_hd64._ragged_paged_attention_kernel, "_patched_src", "")
     assert "kv.astype(q.dtype).T" in src and "kv.astype(q_dtype)" in src
@@ -46,7 +45,7 @@ def test_3a_int8_kv_cache_shape_and_flag(monkeypatch):
 
 def test_3b_quantize_store_dequant_round_trip(monkeypatch):
     monkeypatch.setenv("LFM_KV_INT8", "1")
-    tpu_v5e_patches._patch_kv_int8("quantization", quant_mod)
+    kv_int8.apply()
     k_bf16 = jax.random.normal(jax.random.PRNGKey(42), (64, 8, 64), dtype=jnp.bfloat16)
     v_bf16 = jax.random.normal(jax.random.PRNGKey(43), (64, 8, 64), dtype=jnp.bfloat16)
     k_scale = float(jnp.max(jnp.abs(k_bf16))) / 127.0
