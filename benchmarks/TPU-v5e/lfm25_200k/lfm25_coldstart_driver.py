@@ -1,4 +1,4 @@
-import base64, concurrent.futures, hashlib, json, os, subprocess, sys, threading, time
+import base64, concurrent.futures, hashlib, json, os, re, subprocess, sys, threading, time
 
 hb_stop = threading.Event()
 def hb():
@@ -14,7 +14,6 @@ def log(m):
 
 t_vm0 = time.time()
 t_global0 = float(os.environ.get("T0_GLOBAL", t_vm0))
-log(f"In-VM 200K cold-start timer started at t_vm0={t_vm0:.2f} (t_global0={t_global0:.2f})")
 
 # Unpack subrunner, patches, pallas kernel, prompt builder, startup + cache helpers.
 diag = os.environ.get("LFM_DIAG") == "1"
@@ -32,9 +31,16 @@ for env_k, target_f in [
     if os.environ.get(env_k):
         with open(target_f, "wb") as f: f.write(base64.b64decode(os.environ[env_k]))
 
+sub_src = open(f"/content/{sub_name}").read() if os.path.exists(f"/content/{sub_name}") else ""
+m_len = re.search(r"max_model_len=(\d+)", sub_src)
+max_len = int(os.environ.get("LFM_MAX_MODEL_LEN") or (m_len.group(1) if m_len else (4096 if diag else 0)))
+len_lbl = f"{max_len//1000}K" if max_len and max_len % 1000 == 0 else str(max_len)
+log(f"In-VM {len_lbl} cold-start timer started at t_vm0={t_vm0:.2f} (t_global0={t_global0:.2f})")
+
 sys.path.insert(0, "/content")
-from lfm25_cache import (cache_filename, clean_dir, dir_stats, extract_cache_key_args,
+from lfm25_cache import (CACHE_DIR, cache_filename, clean_dir, dir_stats, extract_cache_key_args,
                          publish_cache, read_vllm_version, restore_cache)
+os.environ["JAX_COMPILATION_CACHE_DIR"] = os.environ["VLLM_XLA_CACHE_PATH"] = CACHE_DIR
 
 if os.environ.get("HF_TOKEN"):
     for d in ["/root/.cache/huggingface", "/root/.config/huggingface"]:
@@ -128,11 +134,9 @@ t_wt_submit = time.time()
 p_v, p_z, t_venv_dl = dl_venv()
 t_venv_unp = unpack_venv(p_v, p_z)
 
-sub_src = open(f"/content/{sub_name}").read()
 ver = read_vllm_version("/dev/shm/vllm_env")
 args_str = extract_cache_key_args(sub_src) or f"src:{hashlib.sha256(sub_src.encode()).hexdigest()[:12]}"
 patches_data = open("/content/tpu_v5e_patches.py", "rb").read() if os.path.exists("/content/tpu_v5e_patches.py") else b""
-max_len = 4096 if diag else 200000
 buckets_str = "16-4096" if diag else "16-8192"
 cache_name = cache_filename(ver, args_str, patches_data, max_model_len=max_len, buckets=buckets_str)
 forced = os.environ.get("LFM_CACHE_FORCE_COLD") == "1"
@@ -145,12 +149,15 @@ if not cache_res.get("hit"):
     clean_dir()
     log(f"cache miss: {cache_name}")
 cache_res.update({"filename": cache_name, "vllm": ver, "key_args": args_str, "dir": dir_stats()})
-log(f"Compile cache {cache_name}: {cache_res}")
+c_dl = cache_res.get("cache_dl_s", cache_res.get("dl_s"))
+c_unp = cache_res.get("cache_unpack_s", cache_res.get("unpack_s"))
+log(f"Compile cache {cache_name}: {cache_res} (cache_dl_s={c_dl}, cache_unpack_s={c_unp})")
 
 t_spawn = time.time()
 startup = {"remount_s": round(t_remount, 2), "venv_dl_s": t_venv_dl, "venv_unpack_s": t_venv_unp,
            "weights_submit_rel_s": round(t_wt_submit - t_vm0, 2),
-           "cache_restore": cache_res, "prep_total_s": round(time.time() - t_prep0, 2),
+           "cache_restore": cache_res, "cache_dl_s": c_dl, "cache_unpack_s": c_unp,
+           "prep_total_s": round(time.time() - t_prep0, 2),
            "subrunner_spawn_rel_s": round(t_spawn - t_vm0, 2)}
 
 py_bin = "/dev/shm/vllm_env/bin/python"

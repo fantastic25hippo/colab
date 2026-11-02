@@ -178,3 +178,13 @@ def test_importing_n_dummy_modules_patches_at_most_once():
     for name in dummy_names:
         assert call_counts.get(name, 0) <= 1
         assert call_counts.get(name, 0) == 1
+
+def test_cache_filename_len100000():
+    import lfm25_cache, re
+    name = lfm25_cache.cache_filename(
+        vllm_version="0.32.0", args_str="--dummy", patch_content="dummy",
+        model_slug="lfm2.5-24b-a2b", max_model_len=100000, buckets="16-8192"
+    )
+    assert "len100000" in name
+    assert re.fullmatch(r"tpu_compile_cache__lfm2\.5-24b-a2b__vllm0\.32\.0__len100000__b16-8192__[0-9a-f]{8}\.tar", name)
+

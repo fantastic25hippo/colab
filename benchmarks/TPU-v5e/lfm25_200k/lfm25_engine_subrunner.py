@@ -26,9 +26,13 @@ from lfm25_prompt import BOS_ID, build_long_prompt_ids, check_prompt_ids, filler
 from lfm25_startup import PHASE, install_log_timeline, summarize_timeline
 from lfm25_cache import dir_stats
 
+cache_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR") or os.environ.get("VLLM_XLA_CACHE_PATH") or "/dev/shm/tpu_compile_cache"
+max_model_len = int(os.environ.get("LFM_MAX_MODEL_LEN") or os.environ.get("MAX_MODEL_LEN") or sys.exit("Error: LFM_MAX_MODEL_LEN or MAX_MODEL_LEN must be set"))
+ctx_k = f"{max_model_len // 1000}K"
+
 # Any change here changes the XLA program set; the driver hashes this line into
 # the compile-cache filename. kv=auto is vLLM's default (bf16 KV).
-CACHE_KEY_ARGS = ("max_model_len=200000;max_num_seqs=1;max_num_batched_tokens=8192;"
+CACHE_KEY_ARGS = (f"max_model_len={max_model_len};max_num_seqs=1;max_num_batched_tokens=8192;"
                   "gpu_memory_utilization=0.92;prefix_caching=0;kv=auto;buckets=16|8192")
 
 def log_sub(m):
@@ -51,9 +55,9 @@ def write_results(res):
     log_sub("Wrote /content/engine_results.json")
 
 t_imp0 = time.time()
-log_sub("Importing jax and vllm for LFM2.5-24B-A2B (200K context)...")
-import jax
-from vllm import LLM, SamplingParams
+log_sub(f"Importing jax and vllm for LFM2.5-24B-A2B ({ctx_k} context)...")
+t0 = time.time(); import jax; log_sub(f"import jax: {time.time() - t0:.2f}s")
+t0 = time.time(); from vllm import LLM, SamplingParams; log_sub(f"import vllm: {time.time() - t0:.2f}s")
 t_import_s = time.time() - t_imp0
 log_sub(f"TPU init complete in {t_import_s:.2f}s: {jax.devices()}")
 
@@ -64,10 +68,15 @@ while not os.path.exists("/dev/shm/.weights_ready"):
         break
     time.sleep(0.05)
 t_wait_s = time.time() - t_wait0
-log_sub(f"Weights barrier cleared after {t_wait_s:.2f}s wait; cache={dir_stats()}")
+log_sub(f"Weights barrier cleared after {t_wait_s:.2f}s wait; cache={dir_stats(cache_dir)}")
 
-cache_before = dir_stats()
+cache_before = dir_stats(cache_dir)
 timeline = install_log_timeline()
+t_cfg0 = time.time()
+llm_kw = dict(model="/dev/shm/lfm25_200k", max_model_len=max_model_len, max_num_seqs=1,
+              max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
+              enable_prefix_caching=False, trust_remote_code=True)
+log_sub(f"LLM() arg/config setup in {time.time() - t_cfg0:.4f}s")
 t_eng0 = time.perf_counter()
 err = None
 try:
@@ -76,20 +85,16 @@ try:
         import cProfile, pstats
         pr = cProfile.Profile(); pr.enable()
         try:
-            llm = LLM(model="/dev/shm/lfm25_200k", max_model_len=200000, max_num_seqs=1,
-                      max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
-                      enable_prefix_caching=False, trust_remote_code=True)
+            llm = LLM(**llm_kw)
         finally:
             pr.disable(); pr.dump_stats("/content/lfm_load.prof")
             s = pstats.Stats(pr); s.sort_stats("cumulative").print_stats(40); s.sort_stats("tottime").print_stats(40)
     else:
-        llm = LLM(model="/dev/shm/lfm25_200k", max_model_len=200000, max_num_seqs=1,
-                  max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
-                  enable_prefix_caching=False, trust_remote_code=True)
+        llm = LLM(**llm_kw)
 except Exception as e:
     err = f"{type(e).__name__}: {e}"
 init_dur = time.perf_counter() - t_eng0
-cache_after = dir_stats()
+cache_after = dir_stats(cache_dir)
 
 spans = PHASE["spans"]
 def _span(name):
@@ -114,7 +119,7 @@ if phases["weight_load_s"] is not None and phases["compile_warmup_s"] is not Non
                                              - (phases["kv_alloc_s"] or 0) - phases["compile_warmup_s"], 2)
 
 base = {"ok": err is None, "init_s": round(init_dur, 2), "phases": phases,
-        "engine_args": {"max_model_len": 200000, "max_num_seqs": 1, "max_num_batched_tokens": 8192,
+        "engine_args": {"max_model_len": max_model_len, "max_num_seqs": 1, "max_num_batched_tokens": 8192,
                         "gpu_memory_utilization": 0.92, "enable_prefix_caching": False,
                         "kv_cache_dtype": "auto (vLLM default, bf16)", "buckets": [16, 8192]},
         "cache": {"before": cache_before, "after": cache_after,
@@ -240,8 +245,8 @@ else:
 
     context_evals = {}
     tok = llm.get_tokenizer()
-    filler = filler_text(tok, p_short + " ", 200000)
-    for target_ctx in [32768, 200000]:
+    filler = filler_text(tok, p_short + " ", max_model_len)
+    for target_ctx in [32768, max_model_len]:
         target = target_ctx - 64
         try:
             ids, meta = build_long_prompt_ids(tok, filler, target)

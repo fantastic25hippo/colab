@@ -225,6 +225,35 @@ Cache Contents: 92 compiled XLA programs / metadata files (191,529,744 bytes / 1
 3. **First-Token Latency**: TTFT for the 16-token request was **0.4807s** (45.94 prompt tok/s, 33.41 output tok/s).
 4. **End-to-End Startup**: Total in-VM startup from cold VM spawn to engine ready was **101.82s**, and first token generation completed at **102.30s**. Total host exec time was **121.4s** (down from 236.8s in Run A cold build).
 
+## Part 6: Job 7 startup cleanup, Run B warm restore
+
+Environment: TPU v5e-1, max_model_len=100000, SKIP_JAX_PRECOMPILE=0, LFM_SHORT_REQUEST=1, default launch (no LFM_CACHE_FORCE_COLD). Cache dir `/dev/shm/tpu_compile_cache`. File `tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__e9b7effa.tar`. Driver restore hit=true.
+
+### Phase Table
+
+| Phase | s | Status | Evidence |
+|---|---|---|---|
+| cache_dl_s | 2.92 | MEASURED | driver cache_dl_s |
+| cache_unpack_s | 0.08 | MEASURED | driver cache_unpack_s |
+| import jax | 1.71 | MEASURED | subrunner 08:59:22 |
+| import vllm | 11.65 | MEASURED | subrunner 08:59:34 |
+| TPU init | 13.36 | MEASURED | subrunner; includes jax+vllm |
+| LLM() arg/config setup | 0.0000 | MEASURED | subrunner 08:59:38 |
+| weight_load | 14.885 | MEASURED | engine.phases |
+| compile_warmup | 32.876 | MEASURED | engine.phases |
+| TTFT | 0.4817 | MEASURED | LFM_SHORT_REQUEST |
+| t_vm0 to first token | 108.5 | INFERRED | t_vm0 log 08:59:00 + LLM start 08:59:38 + init_s 70.02 + TTFT 0.4817; JSON in_vm field was null |
+| host t_global0 to t_vm0 | 15.67 | MEASURED | unix 1793609940.86 - 1793609925.19 |
+| host t_global0 to first token | 124.2 | INFERRED | 15.67 + 108.5 |
+| host EXEC wall | 137.2 | MEASURED | EXEC finished; includes wrap-up after first token |
+
+### Cache Note
+- restore hit, 92 entries / 196.0 MB before and after, new_entries=0 (MEASURED)
+- timeline persistent_cache_misses=0 (MEASURED)
+- compile finished in: backbone 16 = 0.34s, backbone 8192 = 1.48s, substitute/select/logits = 0.00s (job6_warm.log) (MEASURED)
+- No explicit persistent-cache hit counter in the log. Hits INFERRED as 92/92 files reused (new_entries=0, misses=0).
+
+
 
 
 

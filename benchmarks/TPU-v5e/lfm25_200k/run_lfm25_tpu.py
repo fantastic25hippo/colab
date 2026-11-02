@@ -55,7 +55,7 @@ def main():
                     "--env", f"LFM_RUN_LABEL={label}"]
         for k, p in blobs.items(): exec_cmd += ["--env", f"{k}={encode_file(p)}"]
         if diag: exec_cmd += ["--env", "LFM_DIAG=1"]
-        if "--force-cold" in argv: exec_cmd += ["--env", "LFM_CACHE_FORCE_COLD=1"]
+        if "--force-cold" in argv or os.environ.get("LFM_CACHE_FORCE_COLD") == "1": exec_cmd += ["--env", "LFM_CACHE_FORCE_COLD=1"]
         if "--no-upload" in argv: exec_cmd += ["--env", "LFM_NO_UPLOAD=1"]
         exec_cmd += ["-f", f"{here}/lfm25_coldstart_driver.py"]
 
