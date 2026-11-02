@@ -124,41 +124,103 @@ def dl_weights():
     log(f"Weights ready in {dur:.2f}s ({man['shards']} shards, {man['total_mb']} MB, {man['mb_s']} MB/s)")
     return man
 
+def dl_and_unpack_cache(c_name, a_str):
+    t_c0 = time.time()
+    try:
+        p_tar = hf_hub_download(repo_id="avgrocketman/tpu-compile-cache",
+                                filename=c_name, local_dir="/dev/shm")
+        t_dl = round(time.time() - t_c0, 2)
+        t_u0 = time.time()
+        r = subprocess.run(["tar", "-xf", p_tar, "-C", "/dev/shm"], capture_output=True, text=True)
+        t_unp = round(time.time() - t_u0, 2)
+        try: os.remove(p_tar)
+        except Exception: pass
+        if r.returncode != 0:
+            clean_dir()
+            res = {"hit": False, "reason": f"tar unpack failed rc={r.returncode}: {r.stderr}",
+                   "cache_dl_s": t_dl, "cache_unpack_s": t_unp}
+        else:
+            res = {"hit": True, "cache_dl_s": t_dl, "cache_unpack_s": t_unp}
+    except Exception as e:
+        clean_dir()
+        res = {"hit": False, "reason": str(e), "cache_dl_s": round(time.time() - t_c0, 2)}
+    res.update({"filename": c_name, "vllm": "0.32.0", "key_args": a_str, "dir": dir_stats()})
+    c_dl = res.get("cache_dl_s", res.get("dl_s"))
+    c_unp = res.get("cache_unpack_s", res.get("unpack_s"))
+    if not res.get("hit"): log(f"cache miss: {c_name}")
+    log(f"Compile cache {c_name}: {res} (cache_dl_s={c_dl}, cache_unpack_s={c_unp})")
+    return res
+
+def setup_thp():
+    if os.environ.get("LFM_THP", "1") == "0": return
+    try:
+        r_thp = subprocess.run(
+            ["sh", "-c", "echo always > /sys/kernel/mm/transparent_hugepage/enabled && echo always > /sys/kernel/mm/transparent_hugepage/defrag"],
+            capture_output=True, text=True)
+        if r_thp.returncode == 0: log("THP OK")
+        else: log(f"THP FAIL ({r_thp.stderr.strip() or r_thp.returncode})")
+    except Exception as e: log(f"THP FAIL ({e})")
+
 log("Step 2: weights, venv and LFM compile cache all in flight; unpacks after...")
 t_prep0 = time.time()
-# Weights start at t~0: the pull (~12-20 s) and the ~119 s HBM load are both on
-# the critical path, so nothing (venv unpack, cache restore) may gate them.
-pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-f_wt = pool.submit(dl_weights)
-t_wt_submit = time.time()
-p_v, p_z, t_venv_dl = dl_venv()
-t_venv_unp = unpack_venv(p_v, p_z)
+par_cache = os.environ.get("LFM_CACHE_PARALLEL", "1") != "0"
+early_imp = os.environ.get("LFM_EARLY_IMPORT", "1") != "0"
+forced = os.environ.get("LFM_CACHE_FORCE_COLD") == "1"
 
-ver = read_vllm_version("/dev/shm/vllm_env")
 args_str = extract_cache_key_args(sub_src) or f"src:{hashlib.sha256(sub_src.encode()).hexdigest()[:12]}"
 patches_data = open("/content/tpu_v5e_patches.py", "rb").read() if os.path.exists("/content/tpu_v5e_patches.py") else b""
 buckets_str = "16-4096" if diag else "16-8192"
-cache_name = cache_filename(ver, args_str, patches_data, max_model_len=max_len, buckets=buckets_str)
-forced = os.environ.get("LFM_CACHE_FORCE_COLD") == "1"
-if diag or forced:
-    clean_dir()
-    cache_res = {"hit": False, "reason": "diag" if diag else "LFM_CACHE_FORCE_COLD=1"}
-else:
-    cache_res = restore_cache(cache_name)
-if not cache_res.get("hit"):
-    clean_dir()
-    log(f"cache miss: {cache_name}")
-cache_res.update({"filename": cache_name, "vllm": ver, "key_args": args_str, "dir": dir_stats()})
-c_dl = cache_res.get("cache_dl_s", cache_res.get("dl_s"))
-c_unp = cache_res.get("cache_unpack_s", cache_res.get("unpack_s"))
-log(f"Compile cache {cache_name}: {cache_res} (cache_dl_s={c_dl}, cache_unpack_s={c_unp})")
+
+pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+f_wt = pool.submit(dl_weights)
+t_wt_submit = time.time()
+f_cache = None
+cache_res = None
+cache_name = None
+
+if par_cache:
+    cache_name = cache_filename("0.32.0", args_str, patches_data, max_model_len=max_len, buckets=buckets_str)
+    if diag or forced:
+        clean_dir()
+        cache_res = {"hit": False, "reason": "diag" if diag else "LFM_CACHE_FORCE_COLD=1",
+                     "filename": cache_name, "vllm": "0.32.0", "key_args": args_str, "dir": dir_stats()}
+        log(f"Compile cache {cache_name}: {cache_res}")
+    else:
+        f_cache = pool.submit(dl_and_unpack_cache, cache_name, args_str)
+
+p_v, p_z, t_venv_dl = dl_venv()
+t_venv_unp = unpack_venv(p_v, p_z)
+
+if not par_cache:
+    ver = read_vllm_version("/dev/shm/vllm_env")
+    cache_name = cache_filename(ver, args_str, patches_data, max_model_len=max_len, buckets=buckets_str)
+    if diag or forced:
+        clean_dir()
+        cache_res = {"hit": False, "reason": "diag" if diag else "LFM_CACHE_FORCE_COLD=1"}
+    else:
+        cache_res = restore_cache(cache_name)
+    if not cache_res.get("hit"):
+        clean_dir()
+        log(f"cache miss: {cache_name}")
+    cache_res.update({"filename": cache_name, "vllm": ver, "key_args": args_str, "dir": dir_stats()})
+    c_dl = cache_res.get("cache_dl_s", cache_res.get("dl_s"))
+    c_unp = cache_res.get("cache_unpack_s", cache_res.get("unpack_s"))
+    log(f"Compile cache {cache_name}: {cache_res} (cache_dl_s={c_dl}, cache_unpack_s={c_unp})")
+
+setup_thp()
+
+if not early_imp and f_cache:
+    cache_res = f_cache.result()
 
 t_spawn = time.time()
 startup = {"remount_s": round(t_remount, 2), "venv_dl_s": t_venv_dl, "venv_unpack_s": t_venv_unp,
            "weights_submit_rel_s": round(t_wt_submit - t_vm0, 2),
-           "cache_restore": cache_res, "cache_dl_s": c_dl, "cache_unpack_s": c_unp,
-           "prep_total_s": round(time.time() - t_prep0, 2),
+           "prep_total_s": round(t_spawn - t_prep0, 2),
            "subrunner_spawn_rel_s": round(t_spawn - t_vm0, 2)}
+if cache_res:
+    startup.update({"cache_restore": cache_res,
+                    "cache_dl_s": cache_res.get("cache_dl_s", cache_res.get("dl_s")),
+                    "cache_unpack_s": cache_res.get("cache_unpack_s", cache_res.get("unpack_s"))})
 
 py_bin = "/dev/shm/vllm_env/bin/python"
 env_b = os.environ.copy()
@@ -181,14 +243,21 @@ for line in proc.stdout: sys.stdout.write(line); sys.stdout.flush()
 proc.wait()
 
 wt_res = f_wt.result()
+if f_cache:
+    cache_res = f_cache.result()
 pool.shutdown(wait=True)
+
+if cache_res:
+    c_dl = cache_res.get("cache_dl_s", cache_res.get("dl_s"))
+    c_unp = cache_res.get("cache_unpack_s", cache_res.get("unpack_s"))
+    startup.update({"cache_restore": cache_res, "cache_dl_s": c_dl, "cache_unpack_s": c_unp})
 
 eng_data = {}
 if os.path.exists("/content/engine_results.json"):
     with open("/content/engine_results.json") as f: eng_data = json.load(f)
 
 pub = None
-if not diag and not cache_res.get("hit") and eng_data.get("ok") and os.environ.get("LFM_NO_UPLOAD") != "1":
+if not diag and cache_res and not cache_res.get("hit") and eng_data.get("ok") and os.environ.get("LFM_NO_UPLOAD") != "1":
     try:
         pub = publish_cache(cache_name)
         log(f"Compile-cache publish: {pub}")

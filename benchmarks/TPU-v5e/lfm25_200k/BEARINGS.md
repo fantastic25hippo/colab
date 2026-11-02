@@ -253,6 +253,42 @@ Environment: TPU v5e-1, max_model_len=100000, SKIP_JAX_PRECOMPILE=0, LFM_SHORT_R
 - compile finished in: backbone 16 = 0.34s, backbone 8192 = 1.48s, substitute/select/logits = 0.00s (job6_warm.log) (MEASURED)
 - No explicit persistent-cache hit counter in the log. Hits INFERRED as 92/92 files reused (new_entries=0, misses=0).
 
+## Part 7: Job 8 startup fixes, Run B warm restore
+
+Environment: TPU v5e-1, max_model_len=100000, SKIP_JAX_PRECOMPILE=0, LFM_SHORT_REQUEST=1, LFM_CACHE_PARALLEL=1, LFM_EARLY_IMPORT=1, LFM_THP=1, LFM_PHASE_DETAIL=1. Cache dir `/dev/shm/tpu_compile_cache`. File `tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__5a0d66f4.tar`. Driver restore hit=true (Run A published new hash with verified_listed=true under FORCE_COLD). THP failed due to read-only `/sys` (continued safely).
+
+### Phase Table
+
+| Phase | Job 8 Run B (s) | Job 7 Run B (s) | Delta | Status | Evidence |
+|---|---|---|---|---|---|
+| cache dl | 2.71 | 2.92 | -0.21s | MEASURED | driver cache_dl_s (overlapped) |
+| cache unpack | 0.11 | 0.08 | +0.03s | MEASURED | driver cache_unpack_s (overlapped) |
+| venv dl | 8.81 | n/a | n/a | MEASURED | driver venv_dl_s |
+| venv unpack | 6.91 | n/a | n/a | MEASURED | driver venv_unpack_s |
+| weights dl | 11.83 | n/a | n/a | MEASURED | driver weights dl (9 shards, 13125.7 MB) |
+| import jax | 1.74 | 1.71 | +0.03s | MEASURED | subrunner 09:44:14 |
+| import vllm | 12.03 | 11.65 | +0.38s | MEASURED | subrunner 09:44:26 |
+| TPU init | 13.77 | 13.36 | +0.41s | MEASURED | subrunner 09:44:30; includes jax+vllm |
+| config_setup_s | ~19.0 | n/a | n/a | INFERRED | JSON null; LLM() start 09:44:30 to V1 engine init 09:44:49 |
+| weight_load | 15.418 | 14.885 | +0.533s | MEASURED | engine.phases.weight_load_s |
+| profile_run | 0.00 | n/a | n/a | MEASURED | LFM25_PHASE profile_run dur_s=0.00 |
+| kv alloc | 0.441 | n/a | n/a | MEASURED | engine.phases.kv_alloc_s |
+| precompile_load | 0.01 | n/a | n/a | MEASURED | LFM25_PHASE precompile_load dur_s=0.01; ~21.2s gap to first warmup |
+| warmup backbone 16 | 3.89 | n/a | n/a | MEASURED | engine.phases warmup task (logged twice, 3.887s) |
+| warmup backbone 8192 | 6.04 | n/a | n/a | MEASURED | engine.phases warmup task (logged twice, 6.041s) |
+| compile_warmup | 31.614 | 32.876 | -1.262s | MEASURED | engine.phases.compile_warmup_s |
+| TTFT | 0.4823 | 0.4817 | +0.0006s | MEASURED | LFM_SHORT_REQUEST TTFT |
+| in-VM total (t_vm0 to first token) | 107.86 | 108.5 | -0.64s | MEASURED | in_vm_cold_start_to_first_token_s (t_vm0=1793612632.28) |
+| host total (t_global0 to first token) | 118.35 | 124.2 | -5.85s | MEASURED | total_cold_start_to_first_token_s (t_global0=1793612621.80) |
+| host EXEC wall | 122.6 | 137.2 | -14.6s | MEASURED | host runner EXEC wall |
+
+### Cache & Runtime Notes
+- Restore hit: 92 entries / 196.0 MB; persistent_cache_misses=0; new_entries=0.
+- Backbone compilations finished in 0.35s (tokens=16) and 1.51s (tokens=8192); subgraphs finished in 0.00s (cache hits).
+- Subrunner spawned at rel 16.65s; weights barrier cleared after 0.00s wait.
+- `llm_init_unaccounted_s`: 21.94s (mostly the inferred config_setup + precompile gap).
+
+
 
 
 

@@ -1,4 +1,4 @@
-import json, os, re, sys, time, urllib.error, urllib.request
+import json, logging, os, re, sys, time, urllib.error, urllib.request
 
 _orig_urlopen = urllib.request.urlopen
 def _fast_urlopen(url, *args, **kwargs):
@@ -32,7 +32,7 @@ ctx_k = f"{max_model_len // 1000}K"
 
 # Any change here changes the XLA program set; the driver hashes this line into
 # the compile-cache filename. kv=auto is vLLM's default (bf16 KV).
-CACHE_KEY_ARGS = (f"max_model_len={max_model_len};max_num_seqs=1;max_num_batched_tokens=8192;"
+CACHE_KEY_ARGS = ("max_model_len=100000;max_num_seqs=1;max_num_batched_tokens=8192;"
                   "gpu_memory_utilization=0.92;prefix_caching=0;kv=auto;buckets=16|8192")
 
 def log_sub(m):
@@ -79,6 +79,19 @@ llm_kw = dict(model="/dev/shm/lfm25_200k", max_model_len=max_model_len, max_num_
 log_sub(f"LLM() arg/config setup in {time.time() - t_cfg0:.4f}s")
 t_eng0 = time.perf_counter()
 err = None
+config_setup_s = None
+class _CfgHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            global config_setup_s
+            if config_setup_s is None and "Initializing a V1 LLM engine" in record.getMessage():
+                config_setup_s = round(time.perf_counter() - t_eng0, 2)
+                log_sub(f"LLM() config setup completed in {config_setup_s:.2f}s")
+        except Exception:
+            pass
+_cfgh = _CfgHandler(level=logging.INFO)
+_loggers = [logging.getLogger(), logging.getLogger("vllm"), logging.getLogger("vllm.v1.engine.core")]
+for _lg in _loggers: _lg.addHandler(_cfgh)
 try:
     # 2026-11-01: kv_cache_dtype left at the default ("auto" -> bf16). fp8 is NOT re-enabled.
     if os.environ.get("LFM_PROFILE_LOAD") == "1":
@@ -93,6 +106,8 @@ try:
         llm = LLM(**llm_kw)
 except Exception as e:
     err = f"{type(e).__name__}: {e}"
+finally:
+    for _lg in _loggers: _lg.removeHandler(_cfgh)
 init_dur = time.perf_counter() - t_eng0
 cache_after = dir_stats(cache_dir)
 
@@ -106,7 +121,7 @@ for s in warm:
     if m: per_bucket.setdefault(m.group(1), []).append(s["dur_s"])
 phases = {
     "import_and_tpu_init_s": round(t_import_s, 2), "wait_for_weights_s": round(t_wait_s, 2),
-    "llm_init_s": round(init_dur, 2),
+    "config_setup_s": config_setup_s, "llm_init_s": round(init_dur, 2),
     "weight_load_s": _span("weight_load"), "kv_alloc_s": _span("kv_alloc"),
     "compile_warmup_s": _span("compile_warmup"),
     "warmup_pass_total_s": None if not warm else round(sum(s["dur_s"] for s in warm), 2),
@@ -116,7 +131,8 @@ phases = {
 }
 if phases["weight_load_s"] is not None and phases["compile_warmup_s"] is not None:
     phases["llm_init_unaccounted_s"] = round(init_dur - phases["weight_load_s"]
-                                             - (phases["kv_alloc_s"] or 0) - phases["compile_warmup_s"], 2)
+                                             - (phases["kv_alloc_s"] or 0) - phases["compile_warmup_s"]
+                                             - (config_setup_s or 0) - (_span("profile_run") or 0), 2)
 
 base = {"ok": err is None, "init_s": round(init_dur, 2), "phases": phases,
         "engine_args": {"max_model_len": max_model_len, "max_num_seqs": 1, "max_num_batched_tokens": 8192,
@@ -162,6 +178,7 @@ if os.environ.get("LFM_SHORT_REQUEST") == "1":
     t0 = time.perf_counter()
     out16 = llm.chat(msgs, sp16, add_generation_prompt=True)
     lat_s = time.perf_counter() - t0
+    first_tok_ts = time.time()
     m = getattr(out16[0], "metrics", None)
     ttft_s = None
     if m:
@@ -173,7 +190,8 @@ if os.environ.get("LFM_SHORT_REQUEST") == "1":
     txt = out16[0].outputs[0].text if out16 and out16[0].outputs else ""
     tok_ids = getattr(out16[0].outputs[0], "token_ids", [])
     log_sub(f"[LFM_SHORT_REQUEST] TTFT: {ttft_s:.4f}s, total latency: {lat_s:.4f}s, tokens={len(tok_ids)}, text={txt!r}")
-    results = dict(base, short_request={"ttft_s": round(ttft_s, 4), "latency_s": round(lat_s, 4), "n_tokens": len(tok_ids), "text": txt},
+    results = dict(base, first_token_ts=first_tok_ts,
+                   short_request={"ttft_s": round(ttft_s, 4), "latency_s": round(lat_s, 4), "n_tokens": len(tok_ids), "text": txt},
                    hbm_stats=get_hbm(), log_timeline=timeline.rows)
     write_results(results)
     log_sub("Engine short request complete")

@@ -374,10 +374,75 @@ _SEEN = set()
 def _is_target_module(m_name):
     return isinstance(m_name, str) and (
         m_name.startswith(_TARGET_PREFIXES)
+        or m_name == "vllm.v1.engine.core"
         or m_name.endswith(_TARGET_SUFFIXES)
         or "short_conv" in m_name
         or "kv_cache" in m_name
     )
+
+def _log_phase(name, t0, t1):
+    try:
+        from lfm25_startup import phase_save
+        phase_save(name, t0, t1)
+    except Exception:
+        dur = t1 - t0
+        print(f"[LFM25_PHASE] {name} dur_s={dur:.2f} start_rel=0.00", flush=True)
+
+def _patch_core_phase_hooks(mod):
+    if os.environ.get("LFM_PHASE_DETAIL", "1") == "0": return
+    import time
+    cls = getattr(mod, "EngineCore", None)
+    if cls and not getattr(cls, "_lfm_phase_core_patched", False):
+        orig_init_from_cfg = getattr(cls, "initialize_from_config", None)
+        if callable(orig_init_from_cfg):
+            def _wrap_init_from_cfg(self, *a, **kw):
+                t0 = time.perf_counter()
+                try: return orig_init_from_cfg(self, *a, **kw)
+                finally: _log_phase("kv_cache_init", t0, time.perf_counter())
+            cls.initialize_from_config = _wrap_init_from_cfg
+        cls._lfm_phase_core_patched = True
+    for c_name in ("EngineCore", "LLMEngine", "Engine"):
+        c = getattr(mod, c_name, None)
+        if c and hasattr(c, "determine_available_memory") and not getattr(c, "_lfm_profile_patched", False):
+            orig_prof = getattr(c, "determine_available_memory")
+            def _wrap_prof(self, *a, _o=orig_prof, **kw):
+                t0 = time.perf_counter()
+                try: return _o(self, *a, **kw)
+                finally: _log_phase("profile_run", t0, time.perf_counter())
+            c.determine_available_memory = _wrap_prof
+            c._lfm_profile_patched = True
+
+def _patch_compilation_manager_phase_hooks(mod):
+    if os.environ.get("LFM_PHASE_DETAIL", "1") == "0": return
+    import time
+    cls = getattr(mod, "CompilationManager", None)
+    if not cls or getattr(cls, "_lfm_comp_phase_patched", False): return
+    orig_capture = getattr(cls, "capture_model", None)
+    if callable(orig_capture):
+        def _wrap_capture(self, *a, **kw):
+            self._lfm_precompile_done = False
+            self._lfm_precompile_t0 = time.perf_counter()
+            return orig_capture(self, *a, **kw)
+        cls.capture_model = _wrap_capture
+    orig_run = getattr(cls, "_run_compilation", None)
+    if callable(orig_run):
+        def _wrap_run(self, name, fn, *a, **kw):
+            wh = kw.get("warmup_handler")
+            if wh is not None and not getattr(self, "_lfm_precompile_done", False):
+                self._lfm_precompile_done = True
+                t0 = getattr(self, "_lfm_precompile_t0", None)
+                if t0 is not None: _log_phase("precompile_load", t0, time.perf_counter())
+            label = f"warmup[{name}:num_tokens={kw.get('num_tokens')}]"
+            if wh is not None and not getattr(wh, "_lfm_phase_wrapped", False):
+                def _w_h(_fn, _args, _ckw, _orig_wh=wh, _l=label):
+                    t0 = time.perf_counter()
+                    try: return _orig_wh(_fn, _args, _ckw)
+                    finally: _log_phase(_l, t0, time.perf_counter())
+                _w_h._lfm_phase_wrapped = True
+                kw["warmup_handler"] = _w_h
+            return orig_run(self, name, fn, *a, **kw)
+        cls._run_compilation = _wrap_run
+    cls._lfm_comp_phase_patched = True
 
 def _patch_loaded_module(name, mod):
     if not mod: return
@@ -385,6 +450,21 @@ def _patch_loaded_module(name, mod):
     if install_phase_hooks and name.endswith(_PHASE_HOOK_SUFFIXES):
         try: install_phase_hooks()
         except Exception: pass
+    if "core" in name or hasattr(mod, "EngineCore"):
+        _patch_core_phase_hooks(mod)
+    if "compilation_manager" in name or hasattr(mod, "CompilationManager"):
+        _patch_compilation_manager_phase_hooks(mod)
+    if hasattr(mod, "TPUWorker") and not getattr(getattr(mod, "TPUWorker"), "_lfm_prof_worker_patched", False):
+        wcls = getattr(mod, "TPUWorker")
+        if hasattr(wcls, "determine_available_memory"):
+            orig_dam = getattr(wcls, "determine_available_memory")
+            def _wrap_dam(self, *a, _o=orig_dam, **kw):
+                if os.environ.get("LFM_PHASE_DETAIL", "1") == "0": return _o(self, *a, **kw)
+                import time; t0 = time.perf_counter()
+                try: return _o(self, *a, **kw)
+                finally: _log_phase("profile_run", t0, time.perf_counter())
+            wcls.determine_available_memory = _wrap_dam
+            wcls._lfm_prof_worker_patched = True
     if "weight_utils" in name:
         cls = getattr(mod, "JaxAutoWeightsLoader", None)
         if cls and not getattr(cls, "_moe_stack_patched", False):

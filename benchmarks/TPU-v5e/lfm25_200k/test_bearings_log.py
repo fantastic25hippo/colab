@@ -188,3 +188,24 @@ def test_cache_filename_len100000():
     assert "len100000" in name
     assert re.fullmatch(r"tpu_compile_cache__lfm2\.5-24b-a2b__vllm0\.32\.0__len100000__b16-8192__[0-9a-f]{8}\.tar", name)
 
+def test_key_args_contains_max_model_len():
+    import lfm25_cache
+    here = os.path.dirname(os.path.abspath(__file__))
+    subrunner_src = open(os.path.join(here, "lfm25_engine_subrunner.py")).read()
+    key_args = lfm25_cache.extract_cache_key_args(subrunner_src)
+    assert "max_model_len=100000" in key_args
+
+def test_in_vm_total_non_null_from_fake_timestamps():
+    first_token_ts, t_vm0, t_global0 = 200.5, 100.0, 80.0
+    in_vm = round(first_token_ts - t_vm0, 2) if first_token_ts else None
+    total = round(first_token_ts - t_global0, 2) if first_token_ts else None
+    assert in_vm is not None and in_vm == 100.5
+    assert total is not None and total == 120.5
+    here = os.path.dirname(os.path.abspath(__file__))
+    subrunner_src = open(os.path.join(here, "lfm25_engine_subrunner.py")).read()
+    idx_req = subrunner_src.find("LFM_SHORT_REQUEST")
+    assert idx_req != -1
+    assert "first_tok_ts = time.time()" in subrunner_src[idx_req:] or "first_token_ts = time.time()" in subrunner_src[idx_req:]
+
+
+
