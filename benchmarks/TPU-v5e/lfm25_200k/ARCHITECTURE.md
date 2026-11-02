@@ -95,8 +95,8 @@ Read this first. Every prompt reads this file before work and adds a change-log 
   - 200K `bf16` KV physically requires `3.8168 GiB` (`3.8147 GiB` attn + `0.0021 GiB` conv) (`AUDIT_A_runtime.md:62`, `MEASURED`/`INFERRED`).
   - Combined with `12.447 GiB` weights, `0.251 GiB` compile scratch, and `0.051 GiB` activations (`0.083 GiB` max), peak HBM reaches `16.566 GiB` (`16.598 GiB` max) (`AUDIT_C_verdict.md:89`, `MEASURED`/`INFERRED`).
   - Deficit: Exceeds total chip HBM (`15.748 GiB`) by `0.818 GiB`, causing OOM even at `util=1.00` (`AUDIT_A_runtime.md:100`, `AUDIT_C_verdict.md:92-93`, `MEASURED`/`INFERRED`).
-- **P2 Exactness Not Checked Against Reference**:
-  - P2 ShortConv slicing at `query_start_loc` ran at 100K (`job10b_warm_2.log:252`), but outputs have not been verified against a HuggingFace CPU/Eager reference (`AUDIT_C_verdict.md:31,68,105`, `NOT TESTED`).
+- **P2 Exactness Verified on CPU (`test_int8_kv_cpu.py`)**:
+  - Patched `_tpu_xla_short_conv_forward` on a 2-chunk prompt (`48 + 16 = 64` tokens, each chunk padded to `T = 64`) matches plain NumPy full-sequence causal conv with `max_abs_diff = 0.0` (`< 1e-3` threshold, `MEASURED` on CPU; TPU 200K `NOT TESTED`).
 - **Compile Numbers Only Measured at 100K**:
   - Post-KV compile scratch (`0.251 GiB`) and peak activation delta (`0.051–0.083 GiB`) were measured on 100K init + 16-token request (`AUDIT_A_runtime.md:78-80`, `MEASURED`).
   - Peak memory across `25 × 8192` consecutive prefill chunks at 200K is unmeasured (`AUDIT_C_verdict.md:110`, `NOT TESTED`).
@@ -126,7 +126,7 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 
 ### Target Specifications
 - **P1 Admission Fix**: Patch `_max_memory_usage_bytes_from_groups` (`kv_cache_utils.py:2337-2366`) and `update_mamba_page_size_padded` (`kv_cache_manager.py:264-291`) so attention checks at unpadded `attn_page_size_bytes` (`16,384 B` `int8`), eliminating `2.8626 GiB` phantom demand (`AUDIT_C_verdict.md:60-62,100`, `NOT TESTED`).
-- **P3 `int8` KV**: Map `kv_cache_dtype` to `jnp.int8` in `kernel_hd64.py` (`(B, 16, 2, 4, 128)`, `16,384 B/block/layer`, `1.9073 GiB` attn + `0.0021 GiB` conv = `1.9094 GiB` total KV at 200K), cast `kv.astype` before matmuls, and pass calibrated scales (`AUDIT_C_verdict.md:76-79,86`, `NOT TESTED`).
+- **P3 `int8` KV**: Map `kv_cache_dtype` to `jnp.int8` in `kernel_hd64.py` (`(B, 16, 2, 4, 128)`, `16,384 B/block/layer`, `1.9073 GiB` attn + `0.0021 GiB` conv = `1.9094 GiB` total KV at 200K), cast `kv.astype` before matmuls, and pass calibrated scales (`tpu_v5e_patches.py:447-510`, `AUDIT_C_verdict.md:76-79,86`, patch written, CPU-tested, TPU `NOT TESTED`).
 - **Utilization**: Set `gpu_memory_utilization = 0.94` (`cap = 14.803 GiB`), adding `+0.315 GiB` KV headroom while retaining `0.945 GiB` reserve (`AUDIT_C_verdict.md:90,102`, `NOT TESTED`).
 - **Target Peak HBM**: `14.658 GiB` (`12.447 GiB` weights + `1.909 GiB` KV + `0.251 GiB` scratch + `0.051 GiB` activations), providing `+1.090 GiB` headroom under `15.748 GiB` limit (`AUDIT_C_verdict.md:89,92`, `NOT TESTED`).
 
@@ -169,4 +169,5 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 - `2026-11-02` **Audit B**: Audited all 6 research document groups (G1–G6), verified formulas, and cataloged calculation errors and stale assumptions (`AUDIT_B_research.md:1-289`, `INFERRED`, hash: `955ca4c`).
 - `2026-11-02` **Audit C**: Adjudicated runtime vs research, proved P1 ShortConv overcount (`2.8626 GiB`) and P3 `int8` feasibility (`1.909 GiB`), and defined 200K target budget (`AUDIT_C_verdict.md:1-111`, `MEASURED`/`INFERRED`, hash: `064a438`).
 - `2026-11-02 Created ARCHITECTURE.md` (hash: `4e5fd46`)
+- `2026-11-02` **Job 2a**: Added `LFM_KV_INT8=1` patch (default OFF) in `tpu_v5e_patches.py` + `tests/test_int8_kv_cpu.py`; verified `int8` KV shape (`16,384 B/block`), round-trip error `<= scale/2`, CPU ref attention (`max_abs=0.031250`, `mean_rel=0.063829`; Pallas needs TPU), and P2 2-chunk ShortConv exactness (`max_abs_diff=0.0`).
 
