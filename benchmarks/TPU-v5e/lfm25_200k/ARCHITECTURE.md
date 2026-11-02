@@ -168,8 +168,9 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 ## TPU launch (tpu-lfm25)
 
 The driver runs in-VM at `/content` (writes `/content/build.log`, unpacks payloads to `/content`, and calls `Popen([py_bin, "-u", f"/content/{sub_name}"], ...)`). The session name `tpu-lfm25` is MEASURED absent from both `lfm25_coldstart_driver.py` and `lfm25_engine_subrunner.py`.
+A first run under a new cache key needs LFM_ABORT_ON_CACHE_MISS=0.
 
-Job 3 int8 16K STOP at abort-on-miss; 8f6acabe.tar 404; session stopped.
+Job 3 int8 16K STOP at G4 needle_pass=False; session tpu-lfm25 stopped.
 
 ### Paste-Ready In-VM Block
 ```bash
@@ -207,4 +208,5 @@ cd /content && LFM_MAX_MODEL_LEN=16384 LFM_KV_INT8=1 python3 lfm25_coldstart_dri
 - `2026-11-02` **Job 3**: Executed on session `tpu-lfm25`; STOP (16K ValueError `invalid literal for int() with base 10: 'input_ids'`); KV stayed bf16 auto (`kv_cache_dtype=auto`, 32768 B/page, RPA q_bfloat16_kv_bfloat16); cache tar published `9535cd10`.
 - `2026-11-02` **Job 3c**: Unified compile-cache key hashing across driver and cache helper via shared `read_patch_content()`; driver now uses `read_patch_content()` instead of `open()`; flag-off key stays `42f6059b`; int8 keys unified across bytes and str paths.
 - `2026-11-02` **Job 3**: int8 16K TPU run STOP (ABORT ON CACHE MISS, 8f6acabe.tar 404, LFM_ABORT_ON_CACHE_MISS default 1); G1–G7 not reached; session tpu-lfm25 stopped (`MEASURED`).
+- `2026-11-02` **Job 3**: int8 16K with LFM_ABORT_ON_CACHE_MISS=0; G1–G3 PASS (fp8, q_bfloat16_kv_float8_e4m3fn, 16384 B page, 13364 blocks, 2.04 GiB); G4 FAIL needle_pass=False; G5–G7 FAIL; session stopped (`MEASURED`).
 
