@@ -74,7 +74,7 @@ if _diag_on:
             _diag_stop.wait(1.0)
     threading.Thread(target=_sampler, daemon=True).start()
 
-t_imp0 = time.time()
+t_imp0, t_imp0_pc = time.time(), time.perf_counter()
 log_sub(f"Importing jax and vllm for LFM2.5-24B-A2B ({ctx_k} context)...")
 t0 = time.time(); import jax; log_sub(f"import jax: {time.time() - t0:.2f}s")
 t0 = time.time(); from vllm import LLM, SamplingParams; log_sub(f"import vllm: {time.time() - t0:.2f}s")
@@ -85,7 +85,7 @@ try:
     def _timed_run_sub(*a, **kw):
         t_sub0 = time.perf_counter()
         try: return _orig_run_sub(*a, **kw)
-        finally: _wf_meta["model_inspect_s"] = round(time.perf_counter() - t_sub0, 4)
+        finally: _wf_meta["model_inspect"] = (t_sub0, round(time.perf_counter() - t_sub0, 4))
     _vreg._run_in_subprocess = _timed_run_sub
 except Exception: pass
 try:
@@ -94,13 +94,13 @@ try:
     def _timed_tok_pretrained(*a, **kw):
         t_tok0 = time.perf_counter()
         try: return _orig_from_pretrained(*a, **kw)
-        finally: _wf_meta["tokenizer_s"] = round(time.perf_counter() - t_tok0, 4)
+        finally: _wf_meta["tokenizer"] = (t_tok0, round(time.perf_counter() - t_tok0, 4))
     _ta.AutoTokenizer.from_pretrained = _timed_tok_pretrained
 except Exception: pass
 t_import_s = time.time() - t_imp0
 log_sub(f"TPU init complete in {t_import_s:.2f}s: {jax.devices()}")
 
-t_wait0 = time.time()
+t_wait0, t_wait0_pc = time.time(), time.perf_counter()
 while not os.path.exists("/dev/shm/.weights_ready"):
     if time.time() - t_wait0 > 600:
         log_sub("Weights barrier timed out after 600s; continuing (LLM() will report)")
@@ -111,7 +111,7 @@ log_sub(f"Weights barrier cleared after {t_wait_s:.2f}s wait; cache={dir_stats(c
 
 cache_before = dir_stats(cache_dir)
 timeline = install_log_timeline()
-t_cfg0 = time.time()
+t_cfg0, t_cfg0_pc = time.time(), time.perf_counter()
 llm_kw = dict(model="/dev/shm/lfm25_200k", max_model_len=max_model_len, max_num_seqs=1,
               max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
               enable_prefix_caching=False, trust_remote_code=True)
@@ -124,7 +124,7 @@ class _CfgHandler(logging.Handler):
         try:
             global config_setup_s
             if config_setup_s is None and "Initializing a V1 LLM engine" in record.getMessage():
-                config_setup_s = round(time.perf_counter() - t_eng0, 2)
+                config_setup_s = round(time.perf_counter() - t_cfg0_pc, 2)
                 log_sub(f"LLM() config setup completed in {config_setup_s:.2f}s")
         except Exception:
             pass
@@ -136,14 +136,14 @@ _orig_cec = _au.EngineArgs.create_engine_config
 def _wf_cec(self, *a, **kw):
     t0 = time.perf_counter()
     try: return _orig_cec(self, *a, **kw)
-    finally: _wf_meta["create_engine_config_s"] = round(time.perf_counter() - t0, 4)
+    finally: _wf_meta["create_engine_config"] = (t0, round(time.perf_counter() - t0, 4))
 _au.EngineArgs.create_engine_config = _wf_cec
-if _diag_on:
+if True:
     import vllm.v1.engine.core as _ec
     _orig_eci = _ec.EngineCore.__init__
     def _d_eci(self, *a, **kw):
         global config_setup_s
-        if config_setup_s is None: config_setup_s = round(time.perf_counter() - t_eng0, 2); log_sub(f"[LFM_DIAG] EngineCore.__init__ reached: config_setup_s={config_setup_s:.2f}s (t_rel={time.time()-_t_g0:.2f}s)")
+        if config_setup_s is None: config_setup_s = round(time.perf_counter() - t_cfg0_pc, 2); log_sub(f"EngineCore.__init__: config_setup_s={config_setup_s:.2f}s")
         return _orig_eci(self, *a, **kw)
     _ec.EngineCore.__init__ = _d_eci
 try:
@@ -163,9 +163,9 @@ except Exception as e:
 finally:
     for _lg in _loggers: _lg.removeHandler(_cfgh)
     _au.EngineArgs.create_engine_config = _orig_cec
-    if _diag_on: _ec.EngineCore.__init__ = _orig_eci
-    if _diag_meta is not None and "create_engine_config_s" in _wf_meta:
-        _diag_meta["create_engine_config_s"] = _wf_meta["create_engine_config_s"]
+    _ec.EngineCore.__init__ = _orig_eci
+    if _diag_meta is not None and "create_engine_config" in _wf_meta:
+        _diag_meta["create_engine_config_s"] = _wf_meta["create_engine_config"][1]
 init_dur = time.perf_counter() - t_eng0
 cache_after = dir_stats(cache_dir)
 
@@ -210,28 +210,27 @@ log_sub(f"Engine ready in {init_dur:.2f}s; weight_load={phases['weight_load_s']}
         f"kv_alloc={phases['kv_alloc_s']}s compile_warmup={phases['compile_warmup_s']}s; "
         f"kv_dtype={base['kv_cache_dtype_resolved']}; HBM={get_hbm()}")
 
-def _emit_waterfall(res, first_tok_ts, ttft_s):
-    t_vm0 = t_imp0
+def _emit_waterfall(res, first_tok_ts, ttft_s, t_ttft0=None):
+    t_vm0, t_sub0 = t_imp0, PHASE["t0"]
     total_vm_s = max(0.0, (first_tok_ts or time.time()) - t_vm0)
     rows = []
     def _add(name, t_start, dur):
         if dur is not None and dur > 0 and t_start is not None:
-            s_rel = max(0.0, t_start - t_vm0)
-            rows.append({"name": name, "start_rel": round(s_rel, 3), "dur_s": round(dur, 3), "end_rel": round(s_rel + dur, 3)})
+            s_rel = round(max(0.0, t_start - t_sub0), 3)
+            rows.append({"name": name, "start_rel": s_rel, "dur_s": round(dur, 3), "end_rel": round(s_rel + dur, 3)})
 
-    _add("imports_and_tpu_init", t_imp0, t_import_s)
-    if t_wait_s > 0.05: _add("wait_for_weights", t_wait0, t_wait_s)
-    if config_setup_s is not None: _add("config_setup", t_cfg0, config_setup_s)
-    for k in ["create_engine_config_s", "model_inspect_s", "tokenizer_s"]:
-        if _wf_meta.get(k): _add(k.replace("_s", ""), t_cfg0, _wf_meta[k])
+    _add("imports_and_tpu_init", t_imp0_pc, t_import_s)
+    if t_wait_s > 0.05: _add("wait_for_weights", t_wait0_pc, t_wait_s)
+    if config_setup_s is not None: _add("config_setup", t_cfg0_pc, config_setup_s)
+    for k in ["create_engine_config", "model_inspect", "tokenizer"]:
+        if k in _wf_meta: _add(k, _wf_meta[k][0], _wf_meta[k][1])
 
     for s in spans:
-        s_ts = s.get("ts") or (t_cfg0 if s.get("start_rel") is None else (t_cfg0 + s["start_rel"]))
-        _add(s["name"], s_ts, s.get("dur_s"))
+        sr = s.get("start_rel_s") or s.get("start_rel")
+        if sr is not None and s.get("dur_s"): rows.append({"name": s["name"], "start_rel": round(sr, 3), "dur_s": round(s["dur_s"], 3), "end_rel": round(sr + s["dur_s"], 3)})
 
     if ttft_s is not None:
-        ttft_start = (first_tok_ts - ttft_s) if first_tok_ts else time.time()
-        _add("ttft", ttft_start, ttft_s)
+        _add("ttft", t_ttft0 or (t_sub0 + total_vm_s - ttft_s), ttft_s)
 
     rows.sort(key=lambda r: (r["start_rel"], r["end_rel"]))
     intervals = []
@@ -307,7 +306,7 @@ if os.environ.get("LFM_SHORT_REQUEST") == "1":
     results = dict(base, first_token_ts=first_tok_ts,
                    short_request={"ttft_s": round(ttft_s, 4), "latency_s": round(lat_s, 4), "n_tokens": len(tok_ids), "text": txt},
                    hbm_stats=get_hbm(), log_timeline=timeline.rows, **({"diag_meta": _diag_meta} if _diag_meta else {}))
-    _emit_waterfall(results, first_tok_ts, ttft_s)
+    _emit_waterfall(results, first_tok_ts, ttft_s, t_ttft0=t0)
     write_results(results)
     log_sub("Engine short request complete")
     sys.exit(0)
@@ -418,6 +417,6 @@ results = dict(base, first_token_ts=first_tok_ts, ttft_short_s=short.get("ttft_s
                    "chat coherence run: greedy, max_tokens=64, no ignore_eos/min_tokens/seed",
                    "64-token decode runs set ignore_eos=True: throughput timing only, text not judged",
                    "kv_cache_dtype is vLLM's default (auto); fp8 is not enabled"])
-_emit_waterfall(results, first_tok_ts, short.get("ttft_s"))
+_emit_waterfall(results, first_tok_ts, short.get("ttft_s"), t_ttft0=t0)
 write_results(results)
 log_sub("Engine benchmarking complete")

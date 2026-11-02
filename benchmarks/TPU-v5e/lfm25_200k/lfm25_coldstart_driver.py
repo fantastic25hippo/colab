@@ -238,13 +238,10 @@ if not par_cache:
 
 setup_thp()
 
-if not early_imp and f_cache:
-    cache_res = f_cache.result()
-
+if f_cache: cache_res = f_cache.result()
 abort_on_miss = os.environ.get("LFM_ABORT_ON_CACHE_MISS", "1") != "0"
-if abort_on_miss and cache_res and not cache_res.get("hit"):
-    c_name = cache_res.get("filename", cache_name)
-    reason = cache_res.get("reason", "unknown")
+if abort_on_miss and (not cache_res or not cache_res.get("hit")):
+    c_name, reason = (cache_res.get("filename", cache_name), cache_res.get("reason", "unknown")) if cache_res else (cache_name, "not_loaded")
     log(f"ABORT ON CACHE MISS: filename={c_name} reason={reason}")
     summary = {
         "ok": False,
@@ -338,10 +335,12 @@ vm_off = round(float(eng_data.get("t_vm0") or t_vm0) - t_global0, 3)
 for r in eng_data.get("waterfall", []):
     waterfall_rows.append({"name": r.get("name", ""), "start_rel": round(r.get("start_rel", 0.0) + vm_off, 3), "dur_s": round(r.get("dur_s", 0.0), 3), "end_rel": round(r.get("end_rel", 0.0) + vm_off, 3), "origin": "in-vm"})
 
+for r in waterfall_rows: r["parallel"] = r.get("parallel") or (r["name"] in ("venv dl", "weights dl", "cache dl", "cache unpack"))
+
 # TTFT row (only if not already provided by subrunner waterfall)
-has_ttft = any(r.get("name") == "TTFT" for r in eng_data.get("waterfall", []))
+has_ttft = any(r.get("name", "").lower() == "ttft" for r in eng_data.get("waterfall", []))
 ttft_s = eng_data.get("ttft_short_s") or eng_data.get("short", {}).get("ttft_s")
-if not has_ttft and first_tok_ts and ttft_s is not None: _add_phase("TTFT", first_tok_ts - ttft_s, first_tok_ts, origin="in-vm")
+if not has_ttft and first_tok_ts and ttft_s is not None: _add_phase("ttft", first_tok_ts - ttft_s, first_tok_ts, origin="in-vm")
 
 # Sort waterfall rows by start_rel then end_rel & calculate non-overlapping merged intervals
 waterfall_rows.sort(key=lambda r: (r["start_rel"], r["end_rel"]))
@@ -366,7 +365,7 @@ for i in range(len(merged_intervals) - 1):
 log("=== Host WATERFALL ===")
 log(f"{'Phase':<24} | {'Start (s)':<10} | {'Dur (s)':<10} | {'End (s)':<10} | {'Origin':<8}")
 log("-" * 72)
-for r in waterfall_rows: log(f"{r['name']:<24} | {r['start_rel']:<10.3f} | {r['dur_s']:<10.3f} | {r['end_rel']:<10.3f} | {r['origin']:<8}")
+for r in waterfall_rows: log(f"{r['name']:<24} | {r['start_rel']:<10.3f} | {r['dur_s']:<10.3f} | {r['end_rel']:<10.3f} | {r['origin']:<8}" + (f" | parallel={str(r['parallel']).lower()}" if r.get("parallel") else ""))
 log("-" * 72)
 log(f"accounted_s = {accounted_s:.3f} s (sum of non-overlapping phase durations)")
 log(f"unaccounted_s = {unaccounted_s:.3f} s (total = {total_s:.3f} s)")

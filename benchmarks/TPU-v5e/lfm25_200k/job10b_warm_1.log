@@ -1,0 +1,302 @@
+[LFM25_DRIVER 12:00:00] In-VM 100K cold-start timer started at t_vm0=1793620800.81 (t_global0=1793620793.20)
+[LFM25_DRIVER 12:00:00] Step 1: Remounting /dev/shm with exec...
+[LFM25_DRIVER 12:00:00] Remount finished in 0.01s (rc=0)
+[LFM25_DRIVER 12:00:01] Step 2: weights, venv and LFM compile cache all in flight; unpacks after...
+[LFM25_DRIVER 12:00:01] [LFM_HF_ANON] download token=none avgrocketman/LFM2.5-24B-A2B-W8A8-W4A16-TPU
+[LFM25_DRIVER 12:00:01] [LFM_HF_ANON] download token=none tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__42f6059b.tar
+[LFM25_DRIVER 12:00:01] [LFM_HF_ANON] download token=none venv312_cpu.tar.zst
+[LFM25_DRIVER 12:00:01] [LFM_HF_ANON] download token=none zstd_bin
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Fetching 17 files:   0%|          | 0/17 [00:00<?, ?it/s]
+Fetching 17 files:   6%|▌         | 1/17 [00:00<00:01,  8.65it/s]
+Fetching 17 files:  29%|██▉       | 5/17 [00:00<00:00, 25.02it/s][LFM25_DRIVER 12:00:03] Compile cache tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__42f6059b.tar: {'hit': True, 'cache_dl_s': 2.49, 'cache_unpack_s': 0.1, 't_dl_start': 1793620801.3401952, 't_dl_end': 1793620803.8311534, 't_unp_start': 1793620803.831161, 't_unp_end': 1793620803.9328692, 'filename': 'tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__42f6059b.tar', 'vllm': '0.32.0', 'key_args': 'max_model_len=100000;max_num_seqs=1;max_num_batched_tokens=8192;gpu_memory_utilization=0.92;prefix_caching=0;kv=auto;buckets=16|8192', 'dir': {'entries': 92, 'mb': 196.0}} (cache_dl_s=2.49, cache_unpack_s=0.1)
+[LFM25_DRIVER 12:00:04] Downloaded venv + zstd_bin in 2.82s (no Qwen XLA cache for LFM)
+
+Fetching 17 files:  47%|████▋     | 8/17 [00:03<00:04,  1.99it/s]
+Fetching 17 files:  59%|█████▉    | 10/17 [00:05<00:04,  1.57it/s]
+Fetching 17 files:  65%|██████▍   | 11/17 [00:06<00:04,  1.24it/s]
+Fetching 17 files:  71%|███████   | 12/17 [00:07<00:03,  1.31it/s]
+Fetching 17 files:  76%|███████▋  | 13/17 [00:07<00:03,  1.33it/s]
+Fetching 17 files:  82%|████████▏ | 14/17 [00:08<00:01,  1.53it/s]
+Fetching 17 files:  88%|████████▊ | 15/17 [00:08<00:01,  1.82it/s]
+Fetching 17 files:  94%|█████████▍| 16/17 [00:08<00:00,  2.29it/s]
+Fetching 17 files: 100%|██████████| 17/17 [00:08<00:00,  2.91it/s]
+Fetching 17 files: 100%|██████████| 17/17 [00:08<00:00,  1.92it/s]
+[LFM25_DRIVER 12:00:10] Weights ready in 9.27s (9 shards, 13125.7 MB, 1416.2 MB/s)
+[LFM25_DRIVER 12:00:12] Unpacked venv in 8.19s
+[LFM25_DRIVER 12:00:12] THP FAIL (sh: 1: cannot create /sys/kernel/mm/transparent_hugepage/enabled: Read-only file system)
+[LFM25_SUBRUNNER 12:00:15] Importing jax and vllm for LFM2.5-24B-A2B (100K context)...
+{"stage": "hb", "t": 1793620815.8101637}
+/dev/shm/vllm_env/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:90: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[LFM25_SUBRUNNER 12:00:17] import jax: 1.70s
+Unable to poll the TPU GCE Metadata: HTTPConnectionPool(host='metadata.google.internal', port=80): Max retries exceeded with url: /computeMetadata/v1/instance/attributes/instance-id (Caused by NewConnectionError("HTTPConnection(host='metadata.google.internal', port=80): Failed to establish a new connection: [Errno 111] Connection refused"))
+Pin memory is not supported on TPU.
+[LFM_INPROC_INSPECT] active
+[LFM25_SUBRUNNER 12:00:27] import vllm: 10.73s
+{"stage": "hb", "t": 1793620830.8103778}
+[LFM25_SUBRUNNER 12:00:31] TPU init complete in 12.43s: [TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)]
+[LFM25_SUBRUNNER 12:00:31] Weights barrier cleared after 0.00s wait; cache={'entries': 92, 'mb': 196.0}
+[LFM25_SUBRUNNER 12:00:31] LLM() arg/config setup in 0.0000s
+[LFM_INPROC_INSPECT] active
+(MainProcess pid=3369) INFO 11-02 12:00:34 [api_utils.py:357] non-default args: {'trust_remote_code': True, 'max_model_len': 100000, 'enable_prefix_caching': False, 'max_num_batched_tokens': 8192, 'max_num_seqs': 1, 'disable_log_stats': True, 'model': '/dev/shm/lfm25_200k'}
+(MainProcess pid=3369) WARNING 11-02 12:00:34 [arg_utils.py:1967] The global random seed is set to 0. Since VLLM_ENABLE_V1_MULTIPROCESSING is set to False, this may affect the random state of the Python process that launched vLLM.
+[LFM_INPROC_INSPECT] active
+(MainProcess pid=3369) INFO 11-02 12:00:34 [model.py:733] Resolved architecture: Lfm2MoeForCausalLM
+(MainProcess pid=3369) INFO 11-02 12:00:34 [model.py:2148] Using max model len 100000
+(MainProcess pid=3369) INFO 11-02 12:00:34 [scheduler.py:307] Chunked prefill is enabled with max_num_batched_tokens=8192.
+(MainProcess pid=3369) WARNING 11-02 12:00:34 [vllm.py:1740] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(MainProcess pid=3369) INFO 11-02 12:00:34 [kernel.py:473] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'], gelu_and_mul_sparse=['native'])
+(MainProcess pid=3369) INFO 11-02 12:00:34 [tpu_platform.py:335] Initialized sharding configuration: ShardingConfigManager(total_devices=1, sharding_strategy=ShardingStrategy(tensor_parallelism=1, expert_parallelism=1, sequence_parallelism=1, data_parallelism=1, attention_data_parallelism=1, attention_data_expert_parallelism=1, decode_context_parallelism=1, prefill_context_parallelism=1), mm_encoder_tp_mode=weights, device_indexes=None)
+(MainProcess pid=3369) INFO 11-02 12:00:34 [tpu_platform.py:485] Force using UniProcExecutor for JAX on single host without pipeline parallelism.
+(MainProcess pid=3369) INFO 11-02 12:00:34 [tpu_platform.py:182] Disabled vLLM UniProc EngineCore startup thread cap (vllm#58946) on TPU.
+(MainProcess pid=3369) WARNING 11-02 12:00:34 [vllm.py:725] Model Runner V2 requires Triton; using the V1 model runner instead.
+(MainProcess pid=3369) INFO 11-02 12:00:34 [compilation.py:317] Enabled custom fusions: norm_quant, act_quant
+[LFM25_SUBRUNNER 12:00:36] EngineCore.__init__: config_setup_s=5.36s
+(MainProcess pid=3369) INFO 11-02 12:00:36 [core.py:133] Initializing a V1 LLM engine (v0.32.0) with config: model='/dev/shm/lfm25_200k', speculative_config=None, tokenizer='/dev/shm/lfm25_200k', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=100000, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=True, quantization=compressed-tensors, quantization_config=None, enforce_eager=False, aux_output_config=AuxOutputConfig(enable_return_routed_experts=False, max_bytes=None), kv_cache_dtype=auto, device_config=None, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, per_request_spec_decode_metrics='none', kv_cache_metrics=False, kv_cache_metrics_sample=0.01, custom_histogram_buckets=None, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=/dev/shm/lfm25_200k, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'eager', 'custom_ops': ['all'], 'ir_enable_torch_wrap': False, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::qwen4_exp_ple_short_conv', 'vllm::qwen4_exp_qsa_with_output', 'vllm::qwen4_exp_qsa_prepare_with_output', 'vllm::linear_attention', 'vllm::qwen_gdn_attention_core', 'vllm::qwen_gdn_attention_core_fused_norm_packed', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::hpc_rope_norm_forward', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'cudagraph_decoder_replay': True, 'decoder_replay_cudagraph_capture_sizes': [], 'decoder_replay_trim_threshold': 768, 'compile_sizes': None, 'compile_ranges_endpoints': [8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': None, 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'fuse_allreduce_rms': False, 'enable_qk_norm_rope_fusion': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False, 'fuse_qk_norm_rope_kvcache': False}, 'max_cudagraph_capture_size': None, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': True, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'], gelu_and_mul_sparse=['native']), enable_flashinfer_autotune=True, enable_rocm_segmented_attn_autotune=False, enable_cutedsl_warmup=True, enable_jit_warmup=True, monokernel=False, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(MainProcess pid=3369) INFO 11-02 12:00:37 [parallel_state.py:1906] world_size=1 rank=0 local_rank=0 distributed_init_method=file:///tmp/tmpfe9aq_2w backend=gloo
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+(MainProcess pid=3369) INFO 11-02 12:00:37 [parallel_state.py:2350] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, ETP rank 0, EP rank 0, EPLB rank N/A
+(MainProcess pid=3369) INFO 11-02 12:00:37 [tpu_runner.py:885] Init mesh | mesh=Mesh('data': 1, 'model': 1, axis_types=(Auto, Auto))
+(MainProcess pid=3369) INFO 11-02 12:00:37 [utils.py:225] Prepared token paddings: [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+(MainProcess pid=3369) INFO 11-02 12:00:37 [utils.py:171] Prepared request paddings: [8]
+(MainProcess pid=3369) INFO 11-02 12:00:37 [utils.py:190] Prepared attn request paddings: [1]
+(MainProcess pid=3369) INFO 11-02 12:00:37 [compilation_manager.py:89] Enabling JAX compile cache.
+(MainProcess pid=3369) INFO 11-02 12:00:37 [tpu_worker.py:472] Init worker | rank=0 | is_first_rank=True | is_last_rank=True | topology_order_id=0 | is_driver_worker=True | hbm=[(0.0, 15.75)]GiB |self.devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)] | total devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)] | local_devices=[TpuDevice(id=0, process_index=0, coords=(0,0,0), core_on_chip=0)]
+(MainProcess pid=3369) INFO 11-02 12:00:37 [model_loader.py:674] Loading model with MODEL_IMPL_TYPE=vllm
+(MainProcess pid=3369) INFO 11-02 12:00:38 [tpu_platform.py:251] Cannot use None backend on TPU. Setting to FLASH_ATTN.
+(MainProcess pid=3369) INFO 11-02 12:00:38 [tpu_platform.py:254] Using FLASH_ATTN backend.
+(MainProcess pid=3369) INFO 11-02 12:00:38 [moe.py:68] [MoE]: Using GMM TP kernel
+(MainProcess pid=3369) INFO 11-02 12:00:38 [base_loader.py:82] Initializing model took 0.242702 seconds
+(MainProcess pid=3369) INFO 11-02 12:00:38 [weight_utils.py:1112] Filesystem type for checkpoints: TMPFS. Checkpoint size: 12.22 GiB. Available RAM: 21.22 GiB.
+(MainProcess pid=3369) INFO 11-02 12:00:38 [weight_utils.py:1135] Auto-prefetch is disabled because the filesystem (TMPFS) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
+
+Loading safetensors checkpoint shards:   0% Completed | 0/9 [00:00<?, ?it/s]
+
+Loading safetensors checkpoint shards:  11% Completed | 1/9 [00:00<00:02,  3.37it/s]
+
+Loading safetensors checkpoint shards:  22% Completed | 2/9 [00:00<00:02,  2.44it/s]
+
+Loading safetensors checkpoint shards:  33% Completed | 3/9 [00:01<00:02,  2.27it/s]
+
+Loading safetensors checkpoint shards:  44% Completed | 4/9 [00:01<00:02,  2.19it/s]
+
+Loading safetensors checkpoint shards:  56% Completed | 5/9 [00:02<00:01,  2.16it/s]
+
+Loading safetensors checkpoint shards:  67% Completed | 6/9 [00:02<00:01,  2.16it/s]
+
+Loading safetensors checkpoint shards:  78% Completed | 7/9 [00:03<00:00,  2.12it/s]
+
+Loading safetensors checkpoint shards:  89% Completed | 8/9 [00:03<00:00,  2.10it/s]
+
+Loading safetensors checkpoint shards: 100% Completed | 9/9 [00:03<00:00,  2.42it/s]
+
+(MainProcess pid=3369) INFO 11-02 12:00:42 [default_loader.py:501] Loading weights took 3.79 seconds
+(MainProcess pid=3369) INFO 11-02 12:00:43 [moe_weights.py:1111] [MoE requantization]: re-quantizing MoE weights to int4
+(MainProcess pid=3369) INFO 11-02 12:00:43 [moe_weights.py:254] w13_weight_w1 shape after padding: (64, 2048, 1536)
+(MainProcess pid=3369) INFO 11-02 12:00:43 [moe_weights.py:255] w13_weight_w3 shape after padding: (64, 2048, 1536)
+(MainProcess pid=3369) INFO 11-02 12:00:43 [moe_weights.py:254] w13_weight_scale_w1 shape after padding: (64, 1, 1, 1536)
+(MainProcess pid=3369) INFO 11-02 12:00:43 [moe_weights.py:255] w13_weight_scale_w3 shape after padding: (64, 1, 1, 1536)
+{"stage": "hb", "t": 1793620845.81053}
+[LFM_BEARINGS] load CPU vllm_get_model: dur_s=13.9550s
+[LFM_BEARINGS] load TPU shard_model_to_tpu: dur_s=0.1601s tensors_moved=608
+(MainProcess pid=3369) INFO 11-02 12:00:52 [vllm_model_wrapper.py:337] Total time to load model weights from storage to TPU: 14.12 seconds.
+[LFM_BEARINGS] HBM after load_weights: used=12.447 GiB (13365066752 B), free=3.301 GiB (3544269312 B)
+(MainProcess pid=3369) INFO 11-02 12:00:52 [tpu_runner.py:1333] Cleared JIT caches after weight loading
+(MainProcess pid=3369) INFO 11-02 12:00:52 [tpu_runner.py:1335] Init model | hbm=[(12.45, 15.75)]GiB
+[LFM25_PHASE] weight_load dur_s=14.42 start_rel=22.45
+(MainProcess pid=3369) INFO 11-02 12:00:52 [tpu_platform.py:562] Using cache_config.block_size: 16 instead of overriding with _align_hybrid_block_size() since we set mamba_page_size_padded in kv_cache_manager.py
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_manager.py:280] Hybrid KV cache: padding every layer spec to 57344 bytes (num_attn_groups=1 × attn_page=32768 + num_mamba_groups=3 × mamba_unpadded=8192). This makes vLLM's num_blocks match per-layer TPU allocation when mamba layers cannot be truly shared.
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_manager.py:471] Compact-mamba KV cache: num_gpu_blocks_override=6681 (attn), _mamba_num_blocks=9 (1 blocks/request). HBM split: attn=10 layers x 6681 blocks x 32768 B = 2.04 GiB; mamba=30 layers x 9 slots x 8192 B = 0.00 GiB; total=2.04 GiB / avail=2.04 GiB. At max_model_len=100000 that backs 1 concurrent requests on the attention side (6250 blocks each) and 9 on the mamba side, out of max_num_reqs=8.
+(MainProcess pid=3369) WARNING 11-02 12:00:52 [kv_cache_manager.py:649] Compilation num_layers = 40
+(MainProcess pid=3369) INFO 11-02 12:00:52 [utils.py:347] Using LBNHC KV cache layout.
+(MainProcess pid=3369) INFO 11-02 12:00:52 [tpu_worker.py:558] Memory statistics | total_hbm_limit_gb=15.75GiB | total_hbm_limit_cap_gb=14.49GiB | total_hbm_used_gb=12.45GiB | total_hbm_avail_gb=2.04GiB
+[LFM25_PHASE] profile_run dur_s=0.00 start_rel=36.88
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_planning.py:1569] Overriding num_gpu_blocks=3821 with num_gpu_blocks_override=6681
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_utils.py:1067] TPU KV cache size: 106,844 tokens, Maximum concurrency for 100,000 tokens per request: 1.07x
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_utils.py:831] kv cache group sizes (100000, 100000, 100000, 16)
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_utils.py:832] kv lcm block sizes 100000
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:997] Compiling sampling with different input shapes.
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:160] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': True, 'logprobs': True, 'allow_distributed_sampling': True}
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:211] Compilation of worker0 sample --> {'num_reqs': 8, 'do_sampling': True, 'logprobs': True, 'allow_distributed_sampling': True} finished in 0.03 [secs].
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:160] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': True, 'logprobs': False, 'allow_distributed_sampling': True}
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:211] Compilation of worker0 sample --> {'num_reqs': 8, 'do_sampling': True, 'logprobs': False, 'allow_distributed_sampling': True} finished in 0.03 [secs].
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:160] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': False, 'logprobs': True, 'allow_distributed_sampling': True}
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:211] Compilation of worker0 sample --> {'num_reqs': 8, 'do_sampling': False, 'logprobs': True, 'allow_distributed_sampling': True} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:160] Precompile worker0 sample --> {'num_reqs': 8, 'do_sampling': False, 'logprobs': False, 'allow_distributed_sampling': True}
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:211] Compilation of worker0 sample --> {'num_reqs': 8, 'do_sampling': False, 'logprobs': False, 'allow_distributed_sampling': True} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:1098] Compiling gather_logprobs with different input shapes.
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:160] Precompile worker0 gather_logprobs --> {'num_reqs': 8}
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:211] Compilation of worker0 gather_logprobs --> {'num_reqs': 8} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:1161] Compiling compute_and_gather_prompt_logprobs with different input shapes.
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:160] Precompile worker0 compute_and_gather_prompt_logprobs --> {'num_tokens': 16}
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:211] Compilation of worker0 compute_and_gather_prompt_logprobs --> {'num_tokens': 16} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:1170] Skipping precompilation of compute_and_gather_prompt_logprobs for num_tokens=8192, as it exceeds the MAX_PRECOMPILE_PROMPT_TOKENS=1024 limit to avoid redundant host CPU JAX tracing for long sequence lengths.
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:258] Warm-up call pass finished in 0.02 [secs] over 4 tasks.
+(MainProcess pid=3369) WARNING 11-02 12:00:52 [kv_cache_manager.py:816] MambaSpec does not support shared layers for now, defaulting to single KV cache per layer...
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_manager.py:1035] Hybrid KV cache layout: num_kv_cache_groups=4, num_kv_cache_tensors=4, kv_cache_config.num_blocks=6681, duplicate_shared_layers=True
+(MainProcess pid=3369) INFO 11-02 12:00:52 [kv_cache_manager.py:1063] Init kv-cache | num_total_layers=40 | num_blocks=[9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 6681, 6681, 6681, 6681, 6681, 6681, 6681, 6681, 6681, 6681] | regular_attn_layers=10 | regular_attn_shape=(num_blocks, (16, 4, 2, 128)) | regular_attn_sharding=NamedSharding(mesh=Mesh('data': 1, 'model': 1, axis_types=(Auto, Auto)), spec=P('data', None, 'model'), memory_kind=device) | regular_attn_dtype=bfloat16 | mamba_layers=30 | mamba_shape=((9, 2, 2048),) | mamba_sharding=(NamedSharding(mesh=Mesh('data': 1, 'model': 1, axis_types=(Auto, Auto)), spec=P('data', None, 'model'), memory_kind=device),) | mamba_dtype=(dtype(bfloat16),) | hbm=[(14.49, 15.75)]Gb
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(9, 2, 2048) dtype=bfloat16 nbytes=73728
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV array: shape=(6681, 16, 4, 2, 128) dtype=bfloat16 nbytes=218923008
+[LFM_BEARINGS] KV total_gib=2.0409 (2191441920 bytes)
+[LFM_BEARINGS] HBM after KV allocation: used=14.492 GiB (15560764416 B), free=1.256 GiB (1348571648 B)
+[LFM25_PHASE] kv_alloc dur_s=0.43 start_rel=36.88
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:266] Precompile all the subgraphs with possible input shapes.
+[LFM25_PHASE] precompile_load dur_s=0.01 start_rel=37.31
+(MainProcess pid=3369) INFO 11-02 12:00:52 [compilation_manager.py:160] Precompile worker0 backbone --> {'num_tokens': 16, 'num_reqs': 1}
+(MainProcess pid=3369) WARNING 11-02 12:00:52 [decorators.py:694] Detected eager backend, disabling AOT compile.
+(MainProcess pid=3369) INFO 11-02 12:00:52 [monitor.py:40] [backbone] Starting torch.compile
+/dev/shm/vllm_env/lib/python3.12/site-packages/torchax/tensor.py:183: UserWarning: Explicitly requested dtype int64 requested in astype is not available, and will be truncated to dtype int32. To enable more dtypes, set the jax_enable_x64 configuration option or the JAX_ENABLE_X64 shell environment variable. See https://github.com/jax-ml/jax#current-gotchas for more.
+  res = jax_function(self._elem, *args, **kwargs)
+(MainProcess pid=3369) WARNING 11-02 12:00:53 [tuned_block_sizes_hd64.py:456] Couldn`t find tuned sizes for the RPA v3 kernel with ('TPU v5e', 16, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-131072-sw-None')
+(MainProcess pid=3369) INFO 11-02 12:00:53 [tuned_block_sizes_hd64.py:477] RPA v3 kernel tuned block sizes for ('TPU v5e', 16, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-131072-sw-None'): bkv_p=128, bq=16
+(MainProcess pid=3369) INFO 11-02 12:00:57 [monitor.py:62] [backbone] torch.compile and initial profiling/warmup run together took 4.75 s in total
+(MainProcess pid=3369) INFO 11-02 12:01:00 [compilation_manager.py:211] Compilation of worker0 backbone --> {'num_tokens': 16, 'num_reqs': 1} finished in 0.35 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:00 [compilation_manager.py:160] Precompile worker0 backbone --> {'num_tokens': 8192, 'num_reqs': 1}
+(MainProcess pid=3369) INFO 11-02 12:01:00 [tuned_block_sizes_hd64.py:477] RPA v3 kernel tuned block sizes for ('TPU v5e', 16, 'q_bfloat16_kv_bfloat16', 'q_head-32_kv_head-8_head-64', 'max_model_len-131072-sw-None'): bkv_p=128, bq=32
+{"stage": "hb", "t": 1793620860.8106818}
+(MainProcess pid=3369) INFO 11-02 12:01:13 [compilation_manager.py:211] Compilation of worker0 backbone --> {'num_tokens': 8192, 'num_reqs': 1} finished in 1.50 [secs].
+{"stage": "hb", "t": 1793620875.8108404}
+[LFM25_PHASE] warmup[worker0 backbone:num_tokens=16] dur_s=3.86 start_rel=58.20
+[LFM25_PHASE] warmup[worker0 backbone:num_tokens=16] dur_s=3.86 start_rel=58.20
+[LFM25_PHASE] warmup[worker0 backbone:num_tokens=8192] dur_s=6.02 start_rel=62.06
+[LFM25_PHASE] warmup[worker0 backbone:num_tokens=8192] dur_s=6.02 start_rel=62.06
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:258] Warm-up call pass finished in 10.26 [secs] over 2 tasks.
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 8, 'next_tokens_size': 8}
+/dev/shm/vllm_env/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1453: UserWarning: Some donated buffers were not usable: int32[8], int32[8].
+See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+  warnings.warn("Some donated buffers were not usable:"
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of _substitute_placeholder_token_fn --> {'num_tokens': 8, 'next_tokens_size': 8} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 8, 'next_tokens_size': 8}
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of _substitute_placeholder_token_fn --> {'num_tokens': 8, 'next_tokens_size': 8} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 16, 'next_tokens_size': 16}
+/dev/shm/vllm_env/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1453: UserWarning: Some donated buffers were not usable: int32[16], int32[16].
+See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+  warnings.warn("Some donated buffers were not usable:"
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of _substitute_placeholder_token_fn --> {'num_tokens': 16, 'next_tokens_size': 16} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 16, 'next_tokens_size': 8}
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of _substitute_placeholder_token_fn --> {'num_tokens': 16, 'next_tokens_size': 8} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 8192, 'next_tokens_size': 8192}
+/dev/shm/vllm_env/lib/python3.12/site-packages/jax/_src/interpreters/mlir.py:1453: UserWarning: Some donated buffers were not usable: int32[8192], int32[8192].
+See an explanation at https://docs.jax.dev/en/latest/faq.html#buffer-donation.
+  warnings.warn("Some donated buffers were not usable:"
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of _substitute_placeholder_token_fn --> {'num_tokens': 8192, 'next_tokens_size': 8192} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile _substitute_placeholder_token_fn --> {'num_tokens': 8192, 'next_tokens_size': 8}
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of _substitute_placeholder_token_fn --> {'num_tokens': 8192, 'next_tokens_size': 8} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:258] Warm-up call pass finished in 0.00 [secs] over 6 tasks.
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:910] Compiling select_from_array with different input shapes.
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:877] Compiling select_from_array for worker0 select all logits.
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile select_from_array [worker0 select all logits] --> {'array_size': 16, 'index_size': 8}
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of select_from_array [worker0 select all logits] --> {'array_size': 16, 'index_size': 8} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile select_from_array [worker0 select all logits] --> {'array_size': 8192, 'index_size': 8}
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of select_from_array [worker0 select all logits] --> {'array_size': 8192, 'index_size': 8} finished in 0.00 [secs].
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:957] Compiling compute_logits with different input shapes.
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:160] Precompile worker0 compute_logits --> {'num_reqs': 8}
+(MainProcess pid=3369) INFO 11-02 12:01:23 [compilation_manager.py:211] Compilation of worker0 compute_logits --> {'num_reqs': 8} finished in 0.00 [secs].
+[LFM25_PHASE] compile_warmup dur_s=31.25 start_rel=37.31
+(MainProcess pid=3369) INFO 11-02 12:01:23 [core.py:395] init engine (profile, create kv cache, warmup model) took 31.69 s (compilation: 31.25 s)
+(MainProcess pid=3369) INFO 11-02 12:01:25 [hf.py:647] Detected the chat template content format to be 'openai'. You can set `--chat-template-content-format` to override this.
+[LFM25_SUBRUNNER 12:01:25] Engine ready in 54.16s; weight_load=14.424s kv_alloc=0.434s compile_warmup=31.254s; kv_dtype=auto; HBM={'in_use_gib': 14.739, 'peak_gib': 14.77, 'limit_gib': 15.748}
+
+Rendering conversations:   0%|          | 0/1 [00:00<?, ?it/s]
+Rendering conversations: 100%|██████████| 1/1 [00:00<00:00, 876.74it/s]
+
+Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]
+Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.09it/s, est. speed input: 45.89 toks/s, output: 33.37 toks/s]
+Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.09it/s, est. speed input: 45.89 toks/s, output: 33.37 toks/s]
+Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.08it/s, est. speed input: 45.89 toks/s, output: 33.37 toks/s]
+[LFM25_SUBRUNNER 12:01:26] [LFM_SHORT_REQUEST] TTFT: 0.4815s, total latency: 0.4815s, tokens=16, text='The user asks: "Explain the fundamental principles of astrophysics and stellar evolution'
+[LFM25_SUBRUNNER 12:01:26] [WATERFALL] total_vm_s=70.84s accounted_s=65.39s unaccounted_s=5.45s
+[LFM25_SUBRUNNER 12:01:26]      0.01s -   12.44s ( 12.43s): imports_and_tpu_init
+[LFM25_SUBRUNNER 12:01:26]     16.21s -   21.57s (  5.36s): config_setup
+[LFM25_SUBRUNNER 12:01:26]     18.79s -   18.95s (  0.16s): create_engine_config
+[LFM25_SUBRUNNER 12:01:26]     22.45s -   36.87s ( 14.42s): weight_load
+[LFM25_SUBRUNNER 12:01:26]     36.88s -   37.31s (  0.43s): kv_alloc
+[LFM25_SUBRUNNER 12:01:26]     37.31s -   37.33s (  0.01s): precompile_load
+[LFM25_SUBRUNNER 12:01:26]     37.31s -   68.57s ( 31.25s): compile_warmup
+[LFM25_SUBRUNNER 12:01:26]     58.20s -   62.06s (  3.86s): warmup[worker0 backbone:num_tokens=16]
+[LFM25_SUBRUNNER 12:01:26]     58.20s -   62.06s (  3.86s): warmup[worker0 backbone:num_tokens=16]
+[LFM25_SUBRUNNER 12:01:26]     62.06s -   68.09s (  6.02s): warmup[worker0 backbone:num_tokens=8192]
+[LFM25_SUBRUNNER 12:01:26]     62.06s -   68.09s (  6.02s): warmup[worker0 backbone:num_tokens=8192]
+[LFM25_SUBRUNNER 12:01:26]     69.30s -   70.30s (  1.01s): tokenizer
+[LFM25_SUBRUNNER 12:01:26]     70.37s -   70.85s (  0.48s): ttft
+[LFM25_SUBRUNNER 12:01:26] Wrote /content/engine_results.json
+[LFM25_SUBRUNNER 12:01:26] Engine short request complete
+(MainProcess pid=3369) WARNING 11-02 12:01:27 [parallel_state.py:2557] torch.accelerator.empty_host_cache() only available in Pytorch >=2.9
+[LFM25_DRIVER 12:01:29] === Host WATERFALL ===
+[LFM25_DRIVER 12:01:29] Phase                    | Start (s)  | Dur (s)    | End (s)    | Origin  
+[LFM25_DRIVER 12:01:29] ------------------------------------------------------------------------
+[LFM25_DRIVER 12:01:29] session connect          | 0.000      | 4.467      | 4.467      | host    
+[LFM25_DRIVER 12:01:29] upload                   | 4.467      | 0.000      | 4.468      | host    
+[LFM25_DRIVER 12:01:29] EXEC start               | 4.468      | 3.144      | 7.612      | host    
+[LFM25_DRIVER 12:01:29] weights dl               | 8.141      | 9.268      | 17.410     | host     | parallel=true
+[LFM25_DRIVER 12:01:29] cache dl                 | 8.142      | 2.491      | 10.633     | host     | parallel=true
+[LFM25_DRIVER 12:01:29] venv dl                  | 8.142      | 2.816      | 10.958     | host     | parallel=true
+[LFM25_DRIVER 12:01:29] cache unpack             | 10.633     | 0.102      | 10.734     | host     | parallel=true
+[LFM25_DRIVER 12:01:29] venv unpack              | 10.958     | 8.193      | 19.152     | host    
+[LFM25_DRIVER 12:01:29] imports_and_tpu_init     | 22.213     | 12.431     | 34.644     | in-vm   
+[LFM25_DRIVER 12:01:29] config_setup             | 38.417     | 5.360      | 43.777     | in-vm   
+[LFM25_DRIVER 12:01:29] create_engine_config     | 41.000     | 0.159      | 41.159     | in-vm   
+[LFM25_DRIVER 12:01:29] weight_load              | 44.658     | 14.424     | 59.082     | in-vm   
+[LFM25_DRIVER 12:01:29] kv_alloc                 | 59.087     | 0.434      | 59.521     | in-vm   
+[LFM25_DRIVER 12:01:29] precompile_load          | 59.521     | 0.012      | 59.533     | in-vm   
+[LFM25_DRIVER 12:01:29] compile_warmup           | 59.521     | 31.254     | 90.775     | in-vm   
+[LFM25_DRIVER 12:01:29] warmup[worker0 backbone:num_tokens=16] | 80.413     | 3.856      | 84.269     | in-vm   
+[LFM25_DRIVER 12:01:29] warmup[worker0 backbone:num_tokens=16] | 80.413     | 3.856      | 84.269     | in-vm   
+[LFM25_DRIVER 12:01:29] warmup[worker0 backbone:num_tokens=8192] | 84.273     | 6.022      | 90.295     | in-vm   
+[LFM25_DRIVER 12:01:29] warmup[worker0 backbone:num_tokens=8192] | 84.273     | 6.022      | 90.295     | in-vm   
+[LFM25_DRIVER 12:01:29] tokenizer                | 91.504     | 1.008      | 92.512     | in-vm   
+[LFM25_DRIVER 12:01:29] ttft                     | 92.574     | 0.482      | 93.056     | in-vm   
+[LFM25_DRIVER 12:01:29] ------------------------------------------------------------------------
+[LFM25_DRIVER 12:01:29] accounted_s = 84.016 s (sum of non-overlapping phase durations)
+[LFM25_DRIVER 12:01:29] unaccounted_s = 9.034 s (total = 93.050 s)
+[LFM25_DRIVER 12:01:29] unaccounted_gaps = [{'after': 'EXEC start', 'before': 'weights dl', 'gap_s': 0.529}, {'after': 'venv unpack', 'before': 'imports_and_tpu_init', 'gap_s': 3.061}, {'after': 'imports_and_tpu_init', 'before': 'config_setup', 'gap_s': 3.773}, {'after': 'config_setup', 'before': 'weight_load', 'gap_s': 0.881}, {'after': 'weight_load', 'before': 'kv_alloc', 'gap_s': 0.005}, {'after': 'compile_warmup', 'before': 'tokenizer', 'gap_s': 0.729}, {'after': 'tokenizer', 'before': 'ttft', 'gap_s': 0.062}]
+=== COLDSTART_RESULTS_JSONL ===
+{"run_label": "bearings_job10b", "diag": false, "startup": {"remount_s": 0.01, "venv_dl_s": 2.82, "venv_unpack_s": 8.19, "weights_submit_rel_s": 0.53, "prep_total_s": 11.01, "subrunner_spawn_rel_s": 11.54, "cache_restore": {"hit": true, "cache_dl_s": 2.49, "cache_unpack_s": 0.1, "t_dl_start": 1793620801.3401952, "t_dl_end": 1793620803.8311534, "t_unp_start": 1793620803.831161, "t_unp_end": 1793620803.9328692, "filename": "tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__42f6059b.tar", "vllm": "0.32.0", "key_args": "max_model_len=100000;max_num_seqs=1;max_num_batched_tokens=8192;gpu_memory_utilization=0.92;prefix_caching=0;kv=auto;buckets=16|8192", "dir": {"entries": 92, "mb": 196.0}}, "cache_dl_s": 2.49, "cache_unpack_s": 0.1, "weights": {"shards": 9, "total_mb": 13125.7, "per_shard_mb": {"model-00001.safetensors": 1611.8, "model-00002.safetensors": 1612.3, "model-00003.safetensors": 1611.1, "model-00004.safetensors": 1611.7, "model-00005.safetensors": 1612.3, "model-00006.safetensors": 1612.3, "model-00007.safetensors": 1611.4, "model-00008.safetensors": 1611.7, "model-00009.safetensors": 231.3}, "largest": "model-00005.safetensors", "dl_s": 9.27, "t_start": 1793620801.3398278, "t_end": 1793620810.6079738, "mb_s": 1416.2, "shm_read_probe": {"read_mb": 1073.7, "s": 0.114, "mb_s": 9424.7}}}, "weights_dl_s": 9.27, "in_vm_cold_start_to_first_token_s": 85.44, "total_cold_start_to_first_token_s": 93.05, "accounted_s": 84.016, "unaccounted_s": 9.034, "unaccounted_gaps": [{"after": "EXEC start", "before": "weights dl", "gap_s": 0.529}, {"after": "venv unpack", "before": "imports_and_tpu_init", "gap_s": 3.061}, {"after": "imports_and_tpu_init", "before": "config_setup", "gap_s": 3.773}, {"after": "config_setup", "before": "weight_load", "gap_s": 0.881}, {"after": "weight_load", "before": "kv_alloc", "gap_s": 0.005}, {"after": "compile_warmup", "before": "tokenizer", "gap_s": 0.729}, {"after": "tokenizer", "before": "ttft", "gap_s": 0.062}], "waterfall": [{"name": "session connect", "start_rel": 0.0, "dur_s": 4.467, "end_rel": 4.467, "origin": "host", "parallel": false}, {"name": "upload", "start_rel": 4.467, "dur_s": 0.0, "end_rel": 4.468, "origin": "host", "parallel": false}, {"name": "EXEC start", "start_rel": 4.468, "dur_s": 3.144, "end_rel": 7.612, "origin": "host", "parallel": false}, {"name": "weights dl", "start_rel": 8.141, "dur_s": 9.268, "end_rel": 17.41, "origin": "host", "parallel": true}, {"name": "cache dl", "start_rel": 8.142, "dur_s": 2.491, "end_rel": 10.633, "origin": "host", "parallel": true}, {"name": "venv dl", "start_rel": 8.142, "dur_s": 2.816, "end_rel": 10.958, "origin": "host", "parallel": true}, {"name": "cache unpack", "start_rel": 10.633, "dur_s": 0.102, "end_rel": 10.734, "origin": "host", "parallel": true}, {"name": "venv unpack", "start_rel": 10.958, "dur_s": 8.193, "end_rel": 19.152, "origin": "host", "parallel": false}, {"name": "imports_and_tpu_init", "start_rel": 22.213, "dur_s": 12.431, "end_rel": 34.644, "origin": "in-vm", "parallel": false}, {"name": "config_setup", "start_rel": 38.417, "dur_s": 5.36, "end_rel": 43.777, "origin": "in-vm", "parallel": false}, {"name": "create_engine_config", "start_rel": 41.0, "dur_s": 0.159, "end_rel": 41.159, "origin": "in-vm", "parallel": false}, {"name": "weight_load", "start_rel": 44.658, "dur_s": 14.424, "end_rel": 59.082, "origin": "in-vm", "parallel": false}, {"name": "kv_alloc", "start_rel": 59.087, "dur_s": 0.434, "end_rel": 59.521, "origin": "in-vm", "parallel": false}, {"name": "precompile_load", "start_rel": 59.521, "dur_s": 0.012, "end_rel": 59.533, "origin": "in-vm", "parallel": false}, {"name": "compile_warmup", "start_rel": 59.521, "dur_s": 31.254, "end_rel": 90.775, "origin": "in-vm", "parallel": false}, {"name": "warmup[worker0 backbone:num_tokens=16]", "start_rel": 80.413, "dur_s": 3.856, "end_rel": 84.269, "origin": "in-vm", "parallel": false}, {"name": "warmup[worker0 backbone:num_tokens=16]", "start_rel": 80.413, "dur_s": 3.856, "end_rel": 84.269, "origin": "in-vm", "parallel": false}, {"name": "warmup[worker0 backbone:num_tokens=8192]", "start_rel": 84.273, "dur_s": 6.022, "end_rel": 90.295, "origin": "in-vm", "parallel": false}, {"name": "warmup[worker0 backbone:num_tokens=8192]", "start_rel": 84.273, "dur_s": 6.022, "end_rel": 90.295, "origin": "in-vm", "parallel": false}, {"name": "tokenizer", "start_rel": 91.504, "dur_s": 1.008, "end_rel": 92.512, "origin": "in-vm", "parallel": false}, {"name": "ttft", "start_rel": 92.574, "dur_s": 0.482, "end_rel": 93.056, "origin": "in-vm", "parallel": false}], "engine": {"ok": true, "init_s": 54.16, "phases": {"import_and_tpu_init_s": 12.43, "wait_for_weights_s": 0.0, "config_setup_s": 5.36, "llm_init_s": 54.16, "weight_load_s": 14.424, "kv_alloc_s": 0.434, "compile_warmup_s": 31.254, "warmup_pass_total_s": 19.76, "warmup_per_bucket_s": {"16": 7.71, "8192": 12.04}, "warmup_tasks": [{"name": "warmup[worker0 backbone:num_tokens=16]", "dur_s": 3.856}, {"name": "warmup[worker0 backbone:num_tokens=16]", "dur_s": 3.856}, {"name": "warmup[worker0 backbone:num_tokens=8192]", "dur_s": 6.022}, {"name": "warmup[worker0 backbone:num_tokens=8192]", "dur_s": 6.022}], "timeline": {"compile_per_bucket_s": {}, "compile_runs_per_bucket": {}, "warmup_pass": null, "weight_shard_loads": [], "tracing_lines": 0, "persistent_cache_misses": 0}, "log_lines_seen": 2, "llm_init_unaccounted_s": 2.68}, "engine_args": {"max_model_len": 100000, "max_num_seqs": 1, "max_num_batched_tokens": 8192, "gpu_memory_utilization": 0.92, "enable_prefix_caching": false, "kv_cache_dtype": "auto (vLLM default, bf16)", "buckets": [16, 8192]}, "cache": {"before": {"entries": 92, "mb": 196.0}, "after": {"entries": 92, "mb": 196.0}, "new_entries": 0}, "hbm_after_init": {"in_use_gib": 14.739, "peak_gib": 14.77, "limit_gib": 15.748}, "kv_cache_dtype_resolved": "auto", "first_token_ts": 1793620886.2488885, "short_request": {"ttft_s": 0.4815, "latency_s": 0.4815, "n_tokens": 16, "text": "The user asks: \"Explain the fundamental principles of astrophysics and stellar evolution"}, "hbm_stats": {"in_use_gib": 14.739, "peak_gib": 14.79, "limit_gib": 15.748}, "log_timeline": [{"t": 0.18, "log": "vllm", "msg": "Failed to import from vllm._C: ModuleNotFoundError(\"No module named 'vllm._C'\")"}], "waterfall": [{"name": "imports_and_tpu_init", "start_rel": 0.005, "dur_s": 12.431, "end_rel": 12.436}, {"name": "config_setup", "start_rel": 16.209, "dur_s": 5.36, "end_rel": 21.569}, {"name": "create_engine_config", "start_rel": 18.792, "dur_s": 0.159, "end_rel": 18.951}, {"name": "weight_load", "start_rel": 22.45, "dur_s": 14.424, "end_rel": 36.874}, {"name": "kv_alloc", "start_rel": 36.879, "dur_s": 0.434, "end_rel": 37.313}, {"name": "precompile_load", "start_rel": 37.313, "dur_s": 0.012, "end_rel": 37.325}, {"name": "compile_warmup", "start_rel": 37.313, "dur_s": 31.254, "end_rel": 68.567}, {"name": "warmup[worker0 backbone:num_tokens=16]", "start_rel": 58.205, "dur_s": 3.856, "end_rel": 62.061}, {"name": "warmup[worker0 backbone:num_tokens=16]", "start_rel": 58.205, "dur_s": 3.856, "end_rel": 62.061}, {"name": "warmup[worker0 backbone:num_tokens=8192]", "start_rel": 62.065, "dur_s": 6.022, "end_rel": 68.087}, {"name": "warmup[worker0 backbone:num_tokens=8192]", "start_rel": 62.065, "dur_s": 6.022, "end_rel": 68.087}, {"name": "tokenizer", "start_rel": 69.296, "dur_s": 1.008, "end_rel": 70.304}, {"name": "ttft", "start_rel": 70.366, "dur_s": 0.482, "end_rel": 70.848}], "t_vm0": 1793620815.4060552, "accounted_s": 65.393, "unaccounted_s": 5.45, "unaccounted_gaps": [{"after": 12.436, "before": 16.209, "gap_s": 3.773}, {"after": 21.569, "before": 22.45, "gap_s": 0.881}, {"after": 68.567, "before": 69.296, "gap_s": 0.729}, {"after": 70.304, "before": 70.366, "gap_s": 0.062}]}, "cache_publish": null, "subrunner_rc": 0}
+=== END_COLDSTART_RESULTS ===

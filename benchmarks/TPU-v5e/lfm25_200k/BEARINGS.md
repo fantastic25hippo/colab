@@ -326,3 +326,72 @@ Run 1 vs Job 8 warm (107.86 / 118.35 / 122.6) — this run is a COLD compile, no
 - Host WATERFALL unaccounted_s=40.205 s (MEASURED). Gaps: EXEC start→cache dl 0.957 s; venv unpack→imports 3.943 s; imports→precompile_load 3.755 s; compile_warmup→ttft 31.55 s. in-VM unaccounted_s=35.305 s. Goal missed: PHASE rows all pinned at start_rel=16.856 s (INFERRED clock bug).
 - THP FAIL read-only sysfs (MEASURED). HF Hub warned unauthenticated requests (MEASURED).
 - Tell Sahil to check https://huggingface.co/settings/downloads ; do not log in.
+
+## Part 10: Job 10b Waterfall Clock Fix, Early Miss Abort & Warm Runs
+
+Environment: TPU v5e-1 (`tpu-lfm25`), `max_model_len=100000`, `SKIP_JAX_PRECOMPILE=0`, `LFM_SHORT_REQUEST=1`, `LFM_BEARINGS=1`, `LFM_DIAG=0`, `LFM_CACHE_PARALLEL=1`, `LFM_EARLY_IMPORT=1`, `LFM_THP=1`, `LFM_PHASE_DETAIL=1`, `LFM_INPROC_INSPECT=1`, `LFM_PATCH_FAST=1`, `LFM_HF_ANON=1`, `LFM_ABORT_ON_CACHE_MISS=1`.
+Cache tar: `tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__42f6059b.tar` (92 entries, 196.0 MB).
+
+### Preflight (P1–P3)
+- **P1**: Local driver cache key computation = `42f6059b` (MEASURED; matched expected `42f6059b`). PASS.
+- **P2**: Remote compile cache tar verified listed on `avgrocketman/tpu-compile-cache` via tokenless read-only query (MEASURED). PASS.
+- **P3**: `git diff --stat` touched only allowed files (`lfm25_coldstart_driver.py` and `lfm25_engine_subrunner.py`), with 34 insertions (cap 60 changed lines). PASS.
+
+### Fixes Verified
+1. **Early Miss Abort**: `f_cache.result()` resolved before subrunner spawn. On cache miss, exits with code 2 before spawning `lfm25_engine_subrunner.py` or initiating any compilation, publishes nothing, and stops runtime.
+2. **Waterfall Clock**: Every phase records distinct `time.perf_counter()` on start (no shared `t_cfg0` fallback; fixed `start_rel_s` extraction from `PHASE["spans"]`).
+3. **Parallel Marking & Overlap**: Parallel downloads (`weights dl`, `venv dl`, `cache dl`, `cache unpack`) marked `parallel=true` and counted once in `accounted_s` via union of intervals.
+
+### Totals vs Job 8 Baseline
+
+| Metric | Job 8 Warm | Job 10b Run 1 | Job 10b Run 2 | Delta vs Job 8 (Run 2) | Status |
+|---|---|---|---|---|---|
+| Cache hit count | 92 / 92 | 92 / 92 | 92 / 92 | identical | MEASURED |
+| Persistent cache misses | 0 | 0 | 0 | 0 | MEASURED |
+| `config_setup_s` | ~19.0 s (INFERRED) | 5.36 s | 5.32 s | -13.68 s | MEASURED |
+| `weight_load_s` | 15.42 s | 14.42 s | 14.45 s | -0.97 s | MEASURED |
+| `compile_warmup_s` | 31.61 s | 31.25 s | 31.71 s | +0.10 s | MEASURED |
+| In-VM to first token | 107.86 s | 85.44 s | 86.23 s | -21.63 s | MEASURED |
+| Subrunner in-VM to first token | n/a | 70.85 s | 71.31 s | n/a | MEASURED |
+| Host to first token | 118.35 s | 93.05 s | 94.53 s | -23.82 s | MEASURED |
+| Host EXEC wall | 122.6 s | 107.0 s | 98.7 s | -23.90 s | MEASURED |
+| Accounted duration (host) | n/a | 84.016 s | 85.401 s | n/a | MEASURED |
+| Unaccounted duration (host) | n/a | 9.034 s | 9.125 s | n/a | MEASURED |
+
+### Run 2 Host Waterfall
+
+```
+Phase                    | Start (s)  | Dur (s)    | End (s)    | Origin   | Parallel
+-------------------------------------------------------------------------------------------
+session connect          | 0.000      | 4.512      | 4.512      | host     | false
+upload                   | 4.512      | 0.000      | 4.512      | host     | false
+EXEC start               | 4.512      | 3.783      | 8.295      | host     | false
+weights dl               | 8.841      | 9.005      | 17.847     | host     | true
+cache dl                 | 8.842      | 1.839      | 10.680     | host     | true
+venv dl                  | 8.842      | 3.830      | 12.672     | host     | true
+cache unpack             | 10.680     | 0.084      | 10.765     | host     | true
+venv unpack              | 12.672     | 7.463      | 20.135     | host     | false
+imports_and_tpu_init     | 23.228     | 12.409     | 35.637     | in-vm    | false
+config_setup             | 39.459     | 5.320      | 44.779     | in-vm    | false
+create_engine_config     | 42.020     | 0.171      | 42.191     | in-vm    | false
+weight_load              | 45.648     | 14.448     | 60.096     | in-vm    | false
+kv_alloc                 | 60.102     | 0.434      | 60.536     | in-vm    | false
+precompile_load          | 60.536     | 0.013      | 60.549     | in-vm    | false
+compile_warmup           | 60.536     | 31.707     | 92.243     | in-vm    | false
+warmup[16]               | 81.764     | 3.910      | 85.674     | in-vm    | false
+warmup[8192]             | 85.678     | 6.079      | 91.757     | in-vm    | false
+tokenizer                | 92.973     | 1.012      | 93.985     | in-vm    | false
+ttft                     | 94.049     | 0.482      | 94.531     | in-vm    | false
+-------------------------------------------------------------------------------------------
+accounted_s = 85.401 s (sum of non-overlapping phase durations) (MEASURED)
+unaccounted_s = 9.125 s (total = 94.526 s) (MEASURED)
+```
+
+### Named Unaccounted Gaps (Run 2)
+1. `EXEC start` -> `weights dl`: **0.546 s** (driver initialization script startup before parallel download spawn)
+2. `venv unpack` -> `imports_and_tpu_init`: **3.093 s** (subrunner process invocation & python runtime startup)
+3. `imports_and_tpu_init` -> `config_setup`: **3.822 s** (post-import initialization & weights barrier verification)
+4. `config_setup` -> `weight_load`: **0.869 s** (`EngineCore.__init__` return to `TPUWorker.load_model` invocation)
+5. `weight_load` -> `kv_alloc`: **0.006 s** (negligible)
+6. `compile_warmup` -> `tokenizer`: **0.730 s** (post-compilation teardown and tokenizer preparation)
+7. `tokenizer` -> `ttft`: **0.064 s** (request payload dispatch)
