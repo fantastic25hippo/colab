@@ -21,6 +21,11 @@ CACHE_DIR = "/dev/shm/tpu_compile_cache"
 
 def cache_filename(vllm_version, args_str, patch_content, model_slug="lfm2.5-24b-a2b", max_model_len=200000, buckets="16-4096-8192"):
     """Delegate to canonical naming helper."""
+    if os.environ.get("LFM_KV_INT8") == "1":
+        kv_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kv_int8.py")
+        kv_h = hashlib.sha256(open(kv_p, "rb").read()).hexdigest()[:8] if os.path.exists(kv_p) else "0"
+        patch_content = f"{patch_content}__kvint8_{kv_h}"
+        buckets = f"{buckets}__kvint8"
     return build_cache_name(
         model_slug=model_slug,
         vllm_version=vllm_version,

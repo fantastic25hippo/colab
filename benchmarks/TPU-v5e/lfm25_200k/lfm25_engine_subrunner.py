@@ -7,9 +7,10 @@ def _fast_urlopen(url, *args, **kwargs):
     return _orig_urlopen(url, *args, **kwargs)
 urllib.request.urlopen = _fast_urlopen
 
-import tpu_v5e_patches as patches
+import kv_int8, tpu_v5e_patches as patches
 try:
     patches.install_all_patches()
+    kv_int8.apply()
 except Exception: pass
 
 for k, v in {

@@ -104,6 +104,7 @@ Read this first. Every prompt reads this file before work and adds a change-log 
   - Checkpoint lacks KV scales (`_k_scale_float = 1.0`); running with default scale `1.0` clips unscaled activations and degrades output quality (`AUDIT_C_verdict.md:79,101,111`, `NOT TESTED`).
 - **Cache Key Sensitivity (`tpu_v5e_patches.py`)**:
   - The cache key hashes the raw text of `tpu_v5e_patches.py`; never edit it without planning a cold rebuild.
+  - int8 flag is part of the cache key; OFF key = `42f6059b`.
 
 ## 3. Refuted Claims (Never Reuse)
 
@@ -172,5 +173,6 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 - `2026-11-02` **Audit C**: Adjudicated runtime vs research, proved P1 ShortConv overcount (`2.8626 GiB`) and P3 `int8` feasibility (`1.909 GiB`), and defined 200K target budget (`AUDIT_C_verdict.md:1-111`, `MEASURED`/`INFERRED`, hash: `064a438`).
 - `2026-11-02 Created ARCHITECTURE.md` (hash: `4e5fd46`)
 - `2026-11-02` **Job 2a**: Added `LFM_KV_INT8=1` patch (default OFF) in `tpu_v5e_patches.py` + `tests/test_int8_kv_cpu.py`; verified `int8` KV shape (`16,384 B/block`), round-trip error `<= scale/2`, CPU ref attention (`max_abs=0.031250`, `mean_rel=0.063829`; Pallas needs TPU), and P2 2-chunk ShortConv exactness (`max_abs_diff=0.0`) (hash: `bc59605`).
-- `2026-11-02` **Job 2a-fix**: int8 moved to `kv_int8.py`, outside the cache hash (`tpu_v5e_patches.py` restored to `5dab708`, 100K cache key `42f6059b` restored).
+- `2026-11-02` **Job 2a-fix**: int8 moved to `kv_int8.py`, outside the cache hash (`tpu_v5e_patches.py` restored to `5dab708`, 100K cache key `42f6059b` restored) (hash: `635b063`).
+- `2026-11-02` **Job 2b**: Wired `kv_int8.apply()` in `lfm25_engine_subrunner.py:13` and made `lfm25_cache.cache_filename` int8-aware (`LFM_KV_INT8=1` appends `__kvint8` + `kv_int8.py` hash; OFF key = `42f6059b`).
 

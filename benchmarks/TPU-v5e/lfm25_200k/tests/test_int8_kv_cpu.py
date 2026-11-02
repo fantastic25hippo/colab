@@ -20,14 +20,42 @@ for _m, _attrs in (
     if _m not in sys.modules:
         mod = types.ModuleType(_m); [setattr(mod, k, v) for k, v in _attrs.items()]; sys.modules[_m] = mod
 
-import kv_int8, tpu_v5e_patches  # noqa: E402
+import kv_int8, lfm25_cache, tpu_v5e_patches  # noqa: E402
 from tpu_inference import utils as tpu_utils  # noqa: E402
 from tpu_inference.kernels.ragged_paged_attention.v3 import kernel_hd64  # noqa: E402
 from tpu_inference.layers.common import quantization as quant_mod  # noqa: E402
 from tpu_inference.layers.common.quantization import quantize_kv  # noqa: E402
 
 
+def test_2b_cache_key_and_apply_flag_off_vs_on(monkeypatch):
+    patch_txt = open(os.path.join(_DIR, "tpu_v5e_patches.py")).read()
+    args_str = lfm25_cache.extract_cache_key_args(open(os.path.join(_DIR, "lfm25_engine_subrunner.py")).read())
+    monkeypatch.delenv("LFM_KV_INT8", raising=False)
+    fn_off = lfm25_cache.cache_filename("0.32.0", args_str, patch_txt, max_model_len=100000, buckets="16-8192")
+    assert fn_off.endswith("__42f6059b.tar") and "kvint8" not in fn_off
+    stub_u, stub_k = types.ModuleType("tpu_inference.stub_u"), types.ModuleType("tpu_inference.stub_kernel_hd64")
+    stub_u._DTYPE_STR_ALIAS_TO_JAX_DTYPE = {"fp8": jnp.float8_e4m3fn.dtype}
+    def _dummy_k(q, kv, p, q_dtype):
+        s = jnp.matmul(q, kv.T, preferred_element_type=jnp.float32)
+        pv = jnp.matmul(p, kv, preferred_element_type=jnp.float32)
+        return s, pv
+    stub_k._ragged_paged_attention_kernel = _dummy_k
+    monkeypatch.setitem(sys.modules, "tpu_inference.stub_u", stub_u)
+    monkeypatch.setitem(sys.modules, "tpu_inference.stub_kernel_hd64", stub_k)
+    before_u, before_k = dict(stub_u.__dict__), dict(stub_k.__dict__)
+    kv_int8.apply()
+    assert stub_u.__dict__ == before_u and stub_k.__dict__ == before_k
+    monkeypatch.setenv("LFM_KV_INT8", "1")
+    fn_on = lfm25_cache.cache_filename("0.32.0", args_str, patch_txt, max_model_len=100000, buckets="16-8192")
+    assert "kvint8" in fn_on and not fn_on.endswith("__42f6059b.tar")
+    kv_int8.apply()
+    assert stub_u._DTYPE_STR_ALIAS_TO_JAX_DTYPE["fp8"] == jnp.int8.dtype
+    src = getattr(stub_k._ragged_paged_attention_kernel, "_patched_src", "")
+    assert "kv.astype(q.dtype).T" in src and "kv.astype(q_dtype)" in src
+
+
 def test_3a_int8_kv_cache_shape_and_flag(monkeypatch):
+    tpu_utils._DTYPE_STR_ALIAS_TO_JAX_DTYPE["fp8"] = jnp.float8_e4m3fn.dtype
     monkeypatch.delenv("LFM_KV_INT8", raising=False)
     kv_int8.apply()
     assert tpu_utils.to_jax_dtype("fp8") == jnp.float8_e4m3fn.dtype
