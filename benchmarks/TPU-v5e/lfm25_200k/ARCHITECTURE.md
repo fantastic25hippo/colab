@@ -165,6 +165,26 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 - **Step 4: 200K XLA Warmup & Cache Tar Publish**: Compile `[16, 8192]` at `max_model_len=200000` and publish `len200000` cache tar; pass test: warm restore completes with 0 persistent cache misses (`AUDIT_C_verdict.md:108`, `NOT TESTED`).
 - **Step 5: Full 200K Run**: Run `199,900`-token single-request benchmark; pass test: completes 25-chunk prefill + decode and logs `peak_bytes_in_use <= 15.748 GiB` (`AUDIT_C_verdict.md:108,110`, `NOT TESTED`).
 
+## TPU launch (tpu-lfm25)
+
+The driver runs in-VM at `/content` (writes `/content/build.log`, unpacks payloads to `/content`, and calls `Popen([py_bin, "-u", f"/content/{sub_name}"], ...)`). The session name `tpu-lfm25` is MEASURED absent from both `lfm25_coldstart_driver.py` and `lfm25_engine_subrunner.py`.
+
+### Paste-Ready In-VM Block
+```bash
+cd /content && LFM_MAX_MODEL_LEN=16384 LFM_KV_INT8=1 python3 lfm25_coldstart_driver.py
+```
+- In `lfm25_coldstart_driver.py:271-286`, the driver prepares `env_b = os.environ.copy()`, modifies specific keys, and launches the subrunner via `subprocess.Popen([py_bin, "-u", f"/content/{sub_name}"], env=env_b, ...)`.
+
+### Parameters & Configuration Details
+- **max_model_len**: Read from `LFM_MAX_MODEL_LEN` in `lfm25_coldstart_driver.py:41-42` and `lfm25_engine_subrunner.py:31`, then passed into `LLM(..., max_model_len=max_model_len, ...)` in `lfm25_engine_subrunner.py:116-118` (MEASURED).
+- **LFM_KV_INT8**: Child process environment `env_b` is an `os.environ.copy()` (`lfm25_coldstart_driver.py:271`), so `LFM_KV_INT8` is forwarded to the subrunner, which calls `kv_int8.apply()` at import in `lfm25_engine_subrunner.py:10-14` (MEASURED).
+- **gpu_memory_utilization=0.92**: Hardcoded in `lfm25_engine_subrunner.py:117` in `llm_kw` with no env override (MEASURED). This matches the Job 3 requirement of 0.92 without any code change.
+- **STOP for a 16K needle**: `lfm25_engine_subrunner.py:382` loops over `for target_ctx in [32768, max_model_len]:`. With `max_model_len=16384`, the first target `32768` exceeds the engine capacity, causing an exception. `LFM_SHORT_REQUEST=1` exits immediately after a 16-token chat request (`lfm25_engine_subrunner.py:289-313`) and never runs a 15K/long prompt. Therefore, a 16K needle evaluation requires a code change at the `[32768, max_model_len]` loop in `lfm25_engine_subrunner.py:382` (MEASURED).
+- **Required env names from driver (names only)**:
+  - B64 payload archives unpacked by the driver (`lfm25_coldstart_driver.py:28-36`): `SUBRUNNER_B64`, `PATCHES_B64`, `PALLAS_B64`, `PROMPT_B64`, `STARTUP_B64`, `CACHE_B64`, `CACHE_NAMING_B64`.
+  - Context length: `LFM_MAX_MODEL_LEN` (`lfm25_coldstart_driver.py:42`).
+  - Child process inherits the process environment via `env_b = os.environ.copy()` (`lfm25_coldstart_driver.py:271`), preserving flags such as `LFM_KV_INT8`.
+
 ## 6. Change Log
 
 - `2026-11-02` **Job 9**: Profiled `config_setup` (11.5 s subprocess in `registry._run_in_subprocess`) and pre-warmup gap (21.9 s JAX/Mosaic lowering); published cache tar `5a0d66f4` (`BEARINGS.md:291-312`, `MEASURED`, hash: `c3be5a0`).
@@ -180,4 +200,5 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 - `2026-11-02` **Job 2c**: Added `./run_cpu_tests.sh` wrapper for single-command CPU test collection and execution.
 - `2026-11-02` **Job 2d**: Pinned CPU test venv + runner; pins in `requirements-cpu-tests.txt`.
 - `2026-11-02` **Job 3**: Preflight stopped at P5; ARCHITECTURE.md does not document how a TPU run is launched on Colab session tpu-lfm25; MEASURED int8 key afa6a03f.
+- `2026-11-02` **Job 3a**: Documented TPU launch in-VM at `/content` with paste-ready command (`cd /content && LFM_MAX_MODEL_LEN=16384 LFM_KV_INT8=1 python3 lfm25_coldstart_driver.py`), confirmed `tpu-lfm25` session name is absent from driver/subrunner, verified `gpu_memory_utilization=0.92` matches without code changes, and identified code change required at `[32768, max_model_len]` for 16K needle eval (`lfm25_coldstart_driver.py:11,28-42,271-286`, `lfm25_engine_subrunner.py:10-14,31,116-118,289-313,382`, `MEASURED`).
 
