@@ -171,3 +171,78 @@ def test_3e_target_ctx_list_dedup_and_filter():
     assert get_targets(32768) == [32768]
     assert get_targets(100000) == [32768, 100000]
     assert get_targets(200000) == [32768, 200000]
+
+
+def test_3f_llm_kwargs_int8_flag(monkeypatch):
+    src = open(os.path.join(_DIR, "lfm25_engine_subrunner.py")).read()
+    assert 'if os.environ.get("LFM_KV_INT8") == "1":' in src
+    assert 'llm_kw["kv_cache_dtype"] = "fp8"' in src
+    def eval_kw():
+        kw = {"model": "/dev/shm/lfm25_200k"}
+        if os.environ.get("LFM_KV_INT8") == "1":
+            kw["kv_cache_dtype"] = "fp8"
+        return kw
+    monkeypatch.delenv("LFM_KV_INT8", raising=False)
+    assert "kv_cache_dtype" not in eval_kw()
+    monkeypatch.setenv("LFM_KV_INT8", "1")
+    kw_on = eval_kw()
+    assert kw_on.get("kv_cache_dtype") == "fp8"
+    stub = types.ModuleType("tpu_inference.utils")
+    stub._DTYPE_STR_ALIAS_TO_JAX_DTYPE = {"fp8": jnp.float8_e4m3fn.dtype}
+    kv_int8.patch_module("tpu_inference.utils", stub)
+    assert stub._DTYPE_STR_ALIAS_TO_JAX_DTYPE[kw_on["kv_cache_dtype"]] == jnp.int8.dtype
+
+
+def test_3g_build_long_prompt_ids_stub_tok():
+    src = open(os.path.join(_DIR, "lfm25_engine_subrunner.py")).read()
+    helpers = ["BOS_ID = 1", "def check_prompt_ids(ids, target=None): pass"]
+    for fn in ("NEEDLE =", "QUESTION =", "def _ids(", "def _suffix_len(", "def _encode_text(", "def _chat_ids(", "def build_long_prompt_ids("):
+        idx = src.index(fn)
+        end = src.find("\ndef ", idx + 1)
+        if end == -1 or fn == "def build_long_prompt_ids(":
+            end = src.index("\ndef _out_ids(")
+        helpers.append(src[idx:end].strip())
+    ns = {}
+    exec("\n\n".join(helpers), ns)
+    fn_build = ns["build_long_prompt_ids"]
+
+    class StubTok:
+        def encode(self, text, add_special_tokens=False):
+            return {"input_ids": [100 + (ord(c) % 50) for c in text]}
+        def apply_chat_template(self, msgs, tokenize=True, add_generation_prompt=True):
+            body = self.encode(msgs[0]["content"])["input_ids"]
+            return {"input_ids": [1, 2] + body + [3, 4, 5]}
+
+    tok = StubTok()
+    target = 1000
+    ids, meta = fn_build(tok, "filler text " * 300, target)
+    assert isinstance(ids, list) and len(ids) == target
+    assert all(isinstance(x, int) for x in ids)
+    pos = meta["needle_pos"]
+    assert 0.40 <= pos / target <= 0.60
+
+    assert meta["needle"] == "The secret code is 7-4-1-9-ORCHID."
+    q_ids = ns["_encode_text"](tok, f"\n{ns['QUESTION']}")
+    tail_n = meta["tail_n"]
+    assert ids[target - tail_n - len(q_ids):target - tail_n] == q_ids
+
+
+def test_3h_driver_and_cache_key_parity(monkeypatch):
+    driver_src = open(os.path.join(_DIR, "lfm25_coldstart_driver.py")).read()
+    assert "read_patch_content" in driver_src
+    assert "cache_filename(" in driver_src
+    sub_src = open(os.path.join(_DIR, "lfm25_engine_subrunner.py")).read()
+    args_str = lfm25_cache.extract_cache_key_args(sub_src)
+    patch_bytes = lfm25_cache.read_patch_content()
+    monkeypatch.delenv("LFM_KV_INT8", raising=False)
+    fn_off = lfm25_cache.cache_filename("0.32.0", args_str, patch_bytes, max_model_len=100000, buckets="16-8192")
+    assert fn_off.endswith("__42f6059b.tar")
+    monkeypatch.setenv("LFM_KV_INT8", "1")
+    fn_on_cache = lfm25_cache.cache_filename("0.32.0", args_str, patch_bytes, max_model_len=16384, buckets="16-8192")
+    fn_on_driver = lfm25_cache.cache_filename("0.32.0", args_str, patch_bytes, max_model_len=16384, buckets="16-8192")
+    assert fn_on_cache == fn_on_driver
+    assert fn_on_cache.endswith("__8f6acabe.tar")
+
+
+
+

@@ -23,7 +23,7 @@ for k, v in {
 }.items(): os.environ.setdefault(k, v)
 os.makedirs(os.environ["JAX_COMPILATION_CACHE_DIR"], exist_ok=True)
 
-from lfm25_prompt import BOS_ID, build_long_prompt_ids, check_prompt_ids, filler_text
+from lfm25_prompt import BOS_ID, check_prompt_ids, filler_text
 from lfm25_startup import PHASE, install_log_timeline, summarize_timeline
 from lfm25_cache import dir_stats
 
@@ -116,6 +116,8 @@ t_cfg0, t_cfg0_pc = time.time(), time.perf_counter()
 llm_kw = dict(model="/dev/shm/lfm25_200k", max_model_len=max_model_len, max_num_seqs=1,
               max_num_batched_tokens=8192, gpu_memory_utilization=0.92,
               enable_prefix_caching=False, trust_remote_code=True)
+if os.environ.get("LFM_KV_INT8") == "1":
+    llm_kw["kv_cache_dtype"] = "fp8"
 log_sub(f"LLM() arg/config setup in {time.time() - t_cfg0:.4f}s")
 t_eng0 = time.perf_counter()
 err = None
@@ -271,9 +273,65 @@ sp_ttft = SamplingParams(max_tokens=1, temperature=0.0, ignore_eos=True)
 sp_chat = SamplingParams(max_tokens=64, temperature=0.0)          # no ignore_eos/min_tokens/seed
 sp_dec = SamplingParams(max_tokens=64, temperature=0.0, ignore_eos=True)
 
+NEEDLE = "The secret code is 7-4-1-9-ORCHID."
+QUESTION = "What is the secret code?"
+
 def _ids(x):
-    if hasattr(x, "tolist"): x = x.tolist()
+    if hasattr(x, "input_ids"):
+        x = x.input_ids
+    elif hasattr(x, "get") and "input_ids" in x:
+        x = x["input_ids"]
+    elif hasattr(x, "data") and hasattr(x.data, "get") and "input_ids" in x.data:
+        x = x.data["input_ids"]
+    if hasattr(x, "tolist"):
+        x = x.tolist()
+    if isinstance(x, (list, tuple)) and len(x) > 0 and isinstance(x[0], (list, tuple)):
+        x = x[0]
     return [int(i) for i in x]
+
+def _suffix_len(a, b, cap):
+    n = 0
+    while n < min(len(a), len(b), cap) and a[-1 - n] == b[-1 - n]:
+        n += 1
+    return n
+
+def _encode_text(tok, text):
+    try: res = tok.encode(text, add_special_tokens=False)
+    except TypeError: res = tok.encode(text)
+    return [i for i in _ids(res) if i != BOS_ID]
+
+def _chat_ids(tok, content):
+    res = tok.apply_chat_template(
+        [{"role": "user", "content": content}],
+        tokenize=True,
+        add_generation_prompt=True,
+    )
+    return _ids(res)
+
+def build_long_prompt_ids(tok, content, target):
+    full = _chat_ids(tok, content)
+    empty = _chat_ids(tok, "")
+    if len(full) < target:
+        raise ValueError(f"filler rendered {len(full)} ids, need >= {target}")
+    tail_n = _suffix_len(full, empty, max(0, len(empty) - 1))
+    if tail_n < 3:
+        raise ValueError(f"chat template tail not found (tail_n={tail_n})")
+    tail_ids = empty[-tail_n:]
+    body_len = target - tail_n
+    body = list(full[:body_len])
+    n_ids = _encode_text(tok, f"\n{NEEDLE}\n")
+    q_ids = _encode_text(tok, f"\n{QUESTION}")
+    if len(q_ids) < body_len:
+        body[body_len - len(q_ids):body_len] = q_ids
+    mid = body_len // 2
+    n_start = max(1, mid - len(n_ids) // 2)
+    if n_start + len(n_ids) <= body_len - len(q_ids):
+        body[n_start:n_start + len(n_ids)] = n_ids
+    ids = body + tail_ids
+    check_prompt_ids(ids, target)
+    meta = {"target": target, "tail_n": tail_n, "rendered_ids": len(full),
+            "needle": NEEDLE, "needle_pos": n_start, "question": QUESTION}
+    return ids, meta
 
 def _out_ids(out):
     try: return _ids(out[0].outputs[0].token_ids)
@@ -393,15 +451,20 @@ else:
             t_dec = time.perf_counter() - t0
             hbm_now = get_hbm()
             echo = _prompt_ids(o_ctx, ids)
+            dec_txt = o_dec[0].outputs[0].text if o_dec and o_dec[0].outputs else ""
+            needle_pass = "7-4-1-9-ORCHID" in dec_txt
+            if not needle_pass:
+                base["ok"] = False
             log_sub(f"Context {target_ctx} (p={len(ids)}, bos={bos}, echo_bos={echo.count(BOS_ID)}, "
                     f"decode ignore_eos=True): TTFT={ttft_ctx:.4f}s, "
-                    f"Decode={64.0/max(1e-6, t_dec):.2f} tok/s, HBM={hbm_now}")
+                    f"Decode={64.0/max(1e-6, t_dec):.2f} tok/s, needle_pass={needle_pass}, HBM={hbm_now}")
             context_evals[str(target_ctx)] = {
                 "prompt_len": len(ids), "ttft_s": round(ttft_ctx, 4),
                 "decode_tok_s": round(64.0/max(1e-6, t_dec), 2), "decode_wall_s": round(t_dec, 4),
                 "decode_tok_s_excl_prefill": round(63.0/max(1e-6, t_dec - ttft_ctx), 2),
                 "prompt_bos_count": bos, "engine_prompt_bos_count": echo.count(BOS_ID),
                 "prompt_ids_first40": ids[:40], "n_out_decode": len(_out_ids(o_dec)),
+                "needle_pass": needle_pass, "needle_ok": needle_pass, "output_text": dec_txt,
                 "build": meta, "hbm": hbm_now}
         except Exception as e:
             context_evals[str(target_ctx)] = {"prompt_len": target,

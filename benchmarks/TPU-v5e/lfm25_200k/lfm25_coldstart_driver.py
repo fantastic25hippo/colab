@@ -45,7 +45,7 @@ log(f"In-VM {len_lbl} cold-start timer started at t_vm0={t_vm0:.2f} (t_global0={
 
 sys.path.insert(0, "/content")
 from lfm25_cache import (CACHE_DIR, cache_filename, clean_dir, dir_stats, extract_cache_key_args,
-                         publish_cache, read_vllm_version, restore_cache)
+                         publish_cache, read_patch_content, read_vllm_version, restore_cache)
 os.environ["JAX_COMPILATION_CACHE_DIR"] = os.environ["VLLM_XLA_CACHE_PATH"] = CACHE_DIR
 
 if os.environ.get("HF_TOKEN"):
@@ -190,7 +190,7 @@ early_imp = os.environ.get("LFM_EARLY_IMPORT", "1") != "0"
 forced = os.environ.get("LFM_CACHE_FORCE_COLD") == "1"
 
 args_str = extract_cache_key_args(sub_src) or f"src:{hashlib.sha256(sub_src.encode()).hexdigest()[:12]}"
-patches_data = open("/content/tpu_v5e_patches.py", "rb").read() if os.path.exists("/content/tpu_v5e_patches.py") else b""
+patches_data = read_patch_content()
 buckets_str = "16-4096" if diag else "16-8192"
 
 pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)

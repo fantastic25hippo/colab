@@ -79,6 +79,7 @@ def _scan_sys_modules():
 def apply():
     if os.environ.get("LFM_KV_INT8") != "1":
         return
+    print("[LFM_KV_INT8] active kv_cache_dtype=fp8", flush=True)
     _SEEN_INT8.clear()
     _scan_sys_modules()
     cur_imp = builtins.__import__

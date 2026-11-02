@@ -19,12 +19,38 @@ REPO_ID = "avgrocketman/tpu-compile-cache"
 CACHE_DIR = "/dev/shm/tpu_compile_cache"
 
 
-def cache_filename(vllm_version, args_str, patch_content, model_slug="lfm2.5-24b-a2b", max_model_len=200000, buckets="16-4096-8192"):
+def read_patch_content(path=None):
+    """Read patch content as bytes from standard locations, file path, str, or bytes."""
+    if isinstance(path, bytes):
+        return path
+    if path is None:
+        for candidate in (
+            "/content/tpu_v5e_patches.py",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "tpu_v5e_patches.py"),
+        ):
+            if os.path.exists(candidate):
+                path = candidate
+                break
+    elif isinstance(path, str):
+        if not os.path.exists(path):
+            candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+            if os.path.exists(candidate):
+                path = candidate
+    if path and isinstance(path, str) and os.path.exists(path):
+        with open(path, "rb") as f:
+            return f.read()
+    if isinstance(path, str):
+        return path.encode("utf-8")
+    return b""
+
+
+def cache_filename(vllm_version, args_str, patch_content=None, model_slug="lfm2.5-24b-a2b", max_model_len=200000, buckets="16-4096-8192"):
     """Delegate to canonical naming helper."""
+    patch_bytes = read_patch_content(patch_content)
     if os.environ.get("LFM_KV_INT8") == "1":
         kv_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kv_int8.py")
         kv_h = hashlib.sha256(open(kv_p, "rb").read()).hexdigest()[:8] if os.path.exists(kv_p) else "0"
-        patch_content = f"{patch_content}__kvint8_{kv_h}"
+        patch_bytes = patch_bytes + f"__kvint8_{kv_h}".encode("utf-8")
         buckets = f"{buckets}__kvint8"
     return build_cache_name(
         model_slug=model_slug,
@@ -32,7 +58,7 @@ def cache_filename(vllm_version, args_str, patch_content, model_slug="lfm2.5-24b
         max_model_len=max_model_len,
         buckets=buckets,
         llm_args=args_str,
-        patch_content=patch_content,
+        patch_content=patch_bytes,
     )
 
 
@@ -108,3 +134,14 @@ def publish_cache(filename, repo_id=REPO_ID, root="/dev/shm"):
         pass
     return {"filename": filename, "tar_s": tar_s, "tar_mb": mb,
             "upload_s": up_s, "verified_listed": verified}
+
+
+if __name__ == "__main__":
+    _src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lfm25_engine_subrunner.py")).read()
+    _a = extract_cache_key_args(_src)
+    os.environ.pop("LFM_KV_INT8", None)
+    print("OFF:", cache_filename("0.32.0", _a, read_patch_content(), max_model_len=100000, buckets="16-8192"))
+    os.environ["LFM_KV_INT8"] = "1"
+    print("INT8_16K_BYTES:", cache_filename("0.32.0", _a, read_patch_content(), max_model_len=16384, buckets="16-8192"))
+    print("INT8_16K_STR:  ", cache_filename("0.32.0", _a, "tpu_v5e_patches.py", max_model_len=16384, buckets="16-8192"))
+

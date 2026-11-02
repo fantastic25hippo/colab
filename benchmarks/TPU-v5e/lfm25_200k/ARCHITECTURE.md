@@ -11,7 +11,7 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 - **Startup Latency**: `85.44 s` (Run 1) / `86.23 s` (Run 2) in-VM cold-start to first token (`94.53 s` host EXEC wall) (`BEARINGS.md:354,357`, `MEASURED`).
 - **Compilation Cache Key**: `42f6059b` (`tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__42f6059b.tar`, 92 entries, 196.0 MB, 0 misses, 100% cache hit rate) (`BEARINGS.md:333,348-350`, `MEASURED`).
 - **CPU tests**: `./run_cpu_tests.sh` (venv `/home/sahil/Desktop/sahil/colab/.venv-cpu-tests`, pins in `requirements-cpu-tests.txt`)
-- **Job 3 Results Note**: STOP (Context 16384 ValueError); KV stayed bf16 auto (`kv_cache_dtype=auto`, 32768 B/page); VM cache tar `9535cd10` (see `results/job3_int8_16k.md`).
+- **Job 3 Results Note**: STOP (Context 16384 ValueError); KV stayed bf16 auto (`kv_cache_dtype=auto`, 32768 B/page); VM cache tar `9535cd10` (now stale; driver/cache hashing unified) (see `results/job3_int8_16k.md`).
 
 ### Model Architecture and Layers
 - **Total Layers**: 40 layers (`Lfm2MoeForCausalLM`): 10 `full_attention` layers + 30 `conv` (`ShortConv`) layers (`AUDIT_A_runtime.md:33`, `MEASURED`).
@@ -203,4 +203,5 @@ cd /content && LFM_MAX_MODEL_LEN=16384 LFM_KV_INT8=1 python3 lfm25_coldstart_dri
 - `2026-11-02` **Job 3a**: Documented TPU launch in-VM at `/content` with paste-ready command (`cd /content && LFM_MAX_MODEL_LEN=16384 LFM_KV_INT8=1 python3 lfm25_coldstart_driver.py`), confirmed `tpu-lfm25` session name is absent from driver/subrunner, verified `gpu_memory_utilization=0.92` matches without code changes, and identified code change required at `[32768, max_model_len]` for 16K needle eval (`lfm25_coldstart_driver.py:11,28-42,271-286`, `lfm25_engine_subrunner.py:10-14,31,116-118,289-313,382`, `MEASURED`).
 - `2026-11-02` **Job 3b**: Filtered and deduplicated needle loop targets `[t for t in (32768, max_model_len) if t <= max_model_len]` in `lfm25_engine_subrunner.py:382`; 16K now runs one target `[16384]`, while >=32K preserves `[32768, max_model_len]` order; added `test_3e` to `tests/test_int8_kv_cpu.py` (`MEASURED`).
 - `2026-11-02` **Job 3**: Executed on session `tpu-lfm25`; STOP (16K ValueError `invalid literal for int() with base 10: 'input_ids'`); KV stayed bf16 auto (`kv_cache_dtype=auto`, 32768 B/page, RPA q_bfloat16_kv_bfloat16); cache tar published `9535cd10`.
+- `2026-11-02` **Job 3c**: Unified compile-cache key hashing across driver and cache helper via shared `read_patch_content()`; driver now uses `read_patch_content()` instead of `open()`; flag-off key stays `42f6059b`; int8 keys unified across bytes and str paths.
 
