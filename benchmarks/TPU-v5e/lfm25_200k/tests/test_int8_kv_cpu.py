@@ -161,3 +161,13 @@ def test_3d_p2_shortconv_two_chunk_vs_numpy():
 
     max_diff = float(np.max(np.abs(np.vstack(outs) - ref_np)))
     assert max_diff < 1e-3
+
+
+def test_3e_target_ctx_list_dedup_and_filter():
+    def get_targets(max_model_len):
+        return list(dict.fromkeys(t for t in (32768, max_model_len) if t <= max_model_len))
+
+    assert get_targets(16384) == [16384]
+    assert get_targets(32768) == [32768]
+    assert get_targets(100000) == [32768, 100000]
+    assert get_targets(200000) == [32768, 200000]

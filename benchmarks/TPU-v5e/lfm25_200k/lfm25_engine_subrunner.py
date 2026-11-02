@@ -379,7 +379,7 @@ else:
     context_evals = {}
     tok = llm.get_tokenizer()
     filler = filler_text(tok, p_short + " ", max_model_len)
-    for target_ctx in [32768, max_model_len]:
+    for target_ctx in dict.fromkeys(t for t in (32768, max_model_len) if t <= max_model_len):
         target = target_ctx - 64
         try:
             ids, meta = build_long_prompt_ids(tok, filler, target)
