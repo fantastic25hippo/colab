@@ -1,0 +1,6 @@
+# torch is installed from https://download.pytorch.org/whl/cpu
+jax==0.12.0.1
+jaxlib==0.12.0.1
+torch==2.10.0+cpu
+numpy==2.5.4
+pytest==9.1.1

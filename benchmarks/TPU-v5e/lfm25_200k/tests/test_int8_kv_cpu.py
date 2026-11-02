@@ -49,6 +49,7 @@ def test_2b_cache_key_and_apply_flag_off_vs_on(monkeypatch):
     fn_on = lfm25_cache.cache_filename("0.32.0", args_str, patch_txt, max_model_len=100000, buckets="16-8192")
     assert "kvint8" in fn_on and not fn_on.endswith("__42f6059b.tar")
     kv_int8.apply()
+    assert "int8" in stub_u._DTYPE_STR_ALIAS_TO_JAX_DTYPE
     assert stub_u._DTYPE_STR_ALIAS_TO_JAX_DTYPE["fp8"] == jnp.int8.dtype
     src = getattr(stub_k._ragged_paged_attention_kernel, "_patched_src", "")
     assert "kv.astype(q.dtype).T" in src and "kv.astype(q_dtype)" in src

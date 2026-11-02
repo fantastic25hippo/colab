@@ -10,7 +10,7 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 - **Execution Mode**: `MODEL_IMPL_TYPE=vllm` (torchax `VllmModelWrapper`) (`AUDIT_A_runtime.md:109,121`, `MEASURED`).
 - **Startup Latency**: `85.44 s` (Run 1) / `86.23 s` (Run 2) in-VM cold-start to first token (`94.53 s` host EXEC wall) (`BEARINGS.md:354,357`, `MEASURED`).
 - **Compilation Cache Key**: `42f6059b` (`tpu_compile_cache__lfm2.5-24b-a2b__vllm0.32.0__len100000__b16-8192__42f6059b.tar`, 92 entries, 196.0 MB, 0 misses, 100% cache hit rate) (`BEARINGS.md:333,348-350`, `MEASURED`).
-- **CPU tests**: `./run_cpu_tests.sh` (env: `/home/sahil/.unsloth/studio/unsloth_studio/bin/python`).
+- **CPU tests**: `./run_cpu_tests.sh` (venv `/home/sahil/Desktop/sahil/colab/.venv-cpu-tests`, pins in `requirements-cpu-tests.txt`)
 
 ### Model Architecture and Layers
 - **Total Layers**: 40 layers (`Lfm2MoeForCausalLM`): 10 `full_attention` layers + 30 `conv` (`ShortConv`) layers (`AUDIT_A_runtime.md:33`, `MEASURED`).
@@ -177,4 +177,5 @@ Read this first. Every prompt reads this file before work and adds a change-log 
 - `2026-11-02` **Job 2a-fix**: int8 moved to `kv_int8.py`, outside the cache hash (`tpu_v5e_patches.py` restored to `5dab708`, 100K cache key `42f6059b` restored) (hash: `635b063`).
 - `2026-11-02` **Job 2b**: Wired `kv_int8.apply()` in `lfm25_engine_subrunner.py:13` and made `lfm25_cache.cache_filename` int8-aware (`LFM_KV_INT8=1` appends `__kvint8` + `kv_int8.py` hash; OFF key = `42f6059b`) (hash: `1abc812`).
 - `2026-11-02` **Job 2c**: Added `./run_cpu_tests.sh` wrapper for single-command CPU test collection and execution.
+- `2026-11-02` **Job 2d**: Pinned CPU test venv + runner; pins in `requirements-cpu-tests.txt`.
 
