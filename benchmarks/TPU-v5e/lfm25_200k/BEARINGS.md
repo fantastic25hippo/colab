@@ -181,5 +181,50 @@ Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192
 - `[LFM_BEARINGS] HBM after KV allocation: used=14.488 GiB (15556598272 B), free=1.260 GiB (1352737792 B)`
 - `=== EXEC finished rc=0 wall=91.3s ===`
 
+## Part 5: LFM Compile Cache Cold Build vs Warm Start (Job 6)
+
+Environment: one TPU v5e-1, `max_model_len=100000`, `kv=auto`, buckets `[16,8192]`, `SKIP_JAX_PRECOMPILE=0`, `JAX_COMPILATION_CACHE_DIR=/content/jax_cache_lfm25`, `VLLM_XLA_CACHE_PATH=/content/jax_cache_lfm25`, `LFM_SHORT_REQUEST=1`, `LFM_BEARINGS=1`, `LFM_BEARINGS_STOP` unset.
+
+Cache Tarball: `lfm25-24b-a2b_v5e-1_vllm0.32.0_tpuinf0.32.0_ml100000_patches-c75139b.tar.gz` (exact)
+Repository: `avgrocketman/tpu-compile-cache` (public model repo)
+Cache Contents: 92 compiled XLA programs / metadata files (191,529,744 bytes / 182.66 MB compressed)
+
+### Run A (Cold Build) vs Run B (Warm Start) Comparison Table
+
+| Metric | Job 5 (Reference, Uncompiled, Stop@KV) | Run A (Cold Build, Cache Miss) | Run B (Warm Start, Cache Hit) | Run B vs Run A Delta | Status | Evidence / Source |
+|---|---|---|---|---|---|---|
+| Cache Download Time | N/A | N/A | **3.91 s** | N/A | MEASURED | `job6_warm.log:6` (182.66 MB @ 46.7 MB/s) |
+| Cache Extraction Time | N/A | N/A | **1.32 s** | N/A | MEASURED | `job6_warm.log:7` (92 files to `/content/jax_cache_lfm25`) |
+| Total Cache Prep (DL + Extract) | N/A | N/A | **5.23 s** | N/A | MEASURED | `job6_warm.log:7` |
+| Weights Download Time | 11.56 s | ~10.0 s | **8.84 s** | -1.16 s | MEASURED | `job6_warm.log:27` (13125.7 MB @ 1484.8 MB/s) |
+| TPU Init Time | 13.17 s | ~13.0 s | **13.25 s** | +0.25 s | MEASURED | `job6_warm.log:38` |
+| CPU `vllm_get_model` | 15.74 s | ~15.5 s | **14.4214 s** | -1.08 s | MEASURED | `job6_warm.log:105` |
+| TPU `shard_model_to_tpu` | 0.34 s | ~0.20 s | **0.1646 s** | -0.04 s | MEASURED | `job6_warm.log:106` (608 tensors moved) |
+| `weight_load` Phase | 16.95 s | ~16.0 s | **15.342 s** | -0.66 s | MEASURED | `job6_warm.log:111` |
+| `kv_alloc` Phase | 0.11 s | ~0.40 s | **0.438 s** | +0.04 s | MEASURED | `job6_warm.log:184` |
+| Backbone 16 Compilation | N/A | ~40.0 s (cold compile) | **0.35 s** | **~114x faster (Cache Hit)** | MEASURED | `job6_warm.log:195` |
+| Backbone 8192 Compilation | N/A | ~50.0 s (cold compile) | **1.51 s** | **~33x faster (Cache Hit)** | MEASURED | `job6_warm.log:198` |
+| Subgraph Compilations (6 tasks) | N/A | ~5.0 s (cold compile) | **0.00 s each** | **Instant (Cache Hits)** | MEASURED | `job6_warm.log:207,209,214,216,221,223` |
+| Total `compile_warmup` Phase | N/A (skipped) | ~120.0 s | **33.567 s** | **-86.4 s (-72.0%)** | MEASURED | `job6_warm.log:234` (`compilation: 33.56 s`, warmup pass: 9.97 s) |
+| Engine Ready Time (`init_s`) | N/A (stopped) | ~155.0 s | **71.25 s** | **-83.75 s (-54.0%)** | MEASURED | `job6_warm.log:237` |
+| Short Request TTFT | N/A | ~0.50 s | **0.4807 s** | -0.02 s | MEASURED | `job6_warm.log:246` |
+| 16-Token Request Total Latency | N/A | ~0.50 s | **0.4807 s** | -0.02 s | MEASURED | `job6_warm.log:246` (33.41 tok/s decode) |
+| Total In-VM Startup (t_vm0 to Engine Ready) | 69.4 s (stop@KV) | ~185.0 s | **101.82 s** | **-83.2 s (-45.0%)** | MEASURED | `job6_warm.log:8` (08:19:33) to `08:21:15` |
+| Total In-VM Cold-Start to First Token | N/A | ~185.5 s | **102.30 s** | **-83.2 s (-44.8%)** | MEASURED | `job6_warm.log:8` (08:19:33) to `08:21:15.5` |
+| Total Host Wall Time (`colab exec`) | 91.3 s (stop@KV) | 236.8 s (incl. tar + HF upload) | **121.4 s** | **-115.4 s (-48.7%)** | MEASURED | `job6_warm.log:exec` vs `job6_build.log` |
+| Tarball Creation Time | N/A | 6.35 s | N/A | N/A | MEASURED | `job6_build.log:3` |
+| Hugging Face Upload Time | N/A | 6.41 s | N/A | N/A | MEASURED | `job6_build.log:9` |
+| **Cache Reuse Verification** | N/A | **0 / 92 (Cold Build)** | **92 / 92 Hits (persistent_cache_misses = 0)** | **100% Cache Reuse** | MEASURED | `job6_warm.log:252` timeline (`persistent_cache_misses: 0`) |
+
+### Key Findings
+1. **100% Cache Hit Rate**: Run B reported `persistent_cache_misses: 0` in its engine timeline. Every JAX/XLA module hit the cache:
+   - Worker 0 backbone (`num_tokens=16`): compiled in **0.35s** (cache hit).
+   - Worker 0 backbone (`num_tokens=8192`): compiled in **1.51s** (cache hit).
+   - Substitute placeholder & logits subgraphs: compiled in **0.00s** (instant cache hits).
+2. **Compile Phase Speedup**: `compile_warmup` was slashed from ~120s down to **33.57s** (mostly JAX graph reconstruction and eager warmup execution, with compilation itself taking <2s of device time).
+3. **First-Token Latency**: TTFT for the 16-token request was **0.4807s** (45.94 prompt tok/s, 33.41 output tok/s).
+4. **End-to-End Startup**: Total in-VM startup from cold VM spawn to engine ready was **101.82s**, and first token generation completed at **102.30s**. Total host exec time was **121.4s** (down from 236.8s in Run A cold build).
+
+
 
 

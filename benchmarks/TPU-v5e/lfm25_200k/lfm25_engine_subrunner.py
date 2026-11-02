@@ -12,15 +12,15 @@ try:
     patches.install_all_patches()
 except Exception: pass
 
-os.environ.update({
+for k, v in {
     "VLLM_ENABLE_V1_MULTIPROCESSING": "0", "VLLM_XLA_CACHE_PATH": "/dev/shm/tpu_compile_cache",
     "JAX_COMPILATION_CACHE_DIR": "/dev/shm/tpu_compile_cache",
     "JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS": "0",
     "JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES": "-1",
     "JAX_PERSISTENT_CACHE_ENABLE_XLA_CACHES": "all",
     "SKIP_JAX_PRECOMPILE": "1",
-})
-os.makedirs("/dev/shm/tpu_compile_cache", exist_ok=True)
+}.items(): os.environ.setdefault(k, v)
+os.makedirs(os.environ["JAX_COMPILATION_CACHE_DIR"], exist_ok=True)
 
 from lfm25_prompt import BOS_ID, build_long_prompt_ids, check_prompt_ids, filler_text
 from lfm25_startup import PHASE, install_log_timeline, summarize_timeline
@@ -151,6 +151,28 @@ def _prompt_ids(out, fallback):
         return _ids(got) if got else list(fallback)
     except Exception:
         return list(fallback)
+
+if os.environ.get("LFM_SHORT_REQUEST") == "1":
+    sp16 = SamplingParams(max_tokens=16, temperature=0.0)
+    t0 = time.perf_counter()
+    out16 = llm.chat(msgs, sp16, add_generation_prompt=True)
+    lat_s = time.perf_counter() - t0
+    m = getattr(out16[0], "metrics", None)
+    ttft_s = None
+    if m:
+        ft = getattr(m, "first_token_time", None)
+        arr = getattr(m, "arrival_time", None)
+        if ft and arr: ttft_s = ft - arr
+        elif getattr(m, "time_to_first_token", None): ttft_s = m.time_to_first_token
+    if ttft_s is None: ttft_s = lat_s
+    txt = out16[0].outputs[0].text if out16 and out16[0].outputs else ""
+    tok_ids = getattr(out16[0].outputs[0], "token_ids", [])
+    log_sub(f"[LFM_SHORT_REQUEST] TTFT: {ttft_s:.4f}s, total latency: {lat_s:.4f}s, tokens={len(tok_ids)}, text={txt!r}")
+    results = dict(base, short_request={"ttft_s": round(ttft_s, 4), "latency_s": round(lat_s, 4), "n_tokens": len(tok_ids), "text": txt},
+                   hbm_stats=get_hbm(), log_timeline=timeline.rows)
+    write_results(results)
+    log_sub("Engine short request complete")
+    sys.exit(0)
 
 short, chat_txt, decode_tok_s, first_tok_ts = {}, "", None, None
 context_evals = {}
